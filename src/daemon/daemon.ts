@@ -23,6 +23,8 @@ export interface DaemonOptions {
   host?: string;
   /** Start the agents' runtimes (off in tests that drive agents by hand). */
   startAgents?: boolean;
+  /** Route agents' model calls through the office's model gateway (default on). */
+  gateway?: boolean;
   now?: () => number;
   tickMs?: number;
   log?: (line: string) => void;
@@ -66,6 +68,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     env.AGENTFLOOR_URL = url;
     env.AGENTFLOOR_AGENT = agentId;
     env.AGENTFLOOR_TOKEN = auth.tokenFor(agentId);
+    env.AGENTFLOOR_GATEWAY = opts.gateway === false ? "0" : "1";
     env.PATH = `${join(ROOT, "bin")}:${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`;
     return env;
   };

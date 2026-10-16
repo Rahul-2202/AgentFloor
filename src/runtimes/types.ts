@@ -19,6 +19,8 @@ export interface Capabilities {
   interrupt: boolean;
   /** The memory file the runtime reads on start (CLAUDE.md, AGENTS.md, GEMINI.md, ...). */
   memoryFile: string;
+  /** Its model calls can go through the office's model gateway. */
+  gateway?: boolean;
 }
 
 export interface AgentContext {

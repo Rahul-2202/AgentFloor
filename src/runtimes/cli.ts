@@ -142,7 +142,10 @@ class CliRuntime implements AgentRuntime {
       if (l.kind === "error") this.errors += l.text + "\n";
       this.ctx.output(l.kind, l.text);
     }
-    if (ev.usage) this.ctx.usage(ev.usage);
+    if (ev.usage) {
+      // Behind the model gateway, tokens are counted there; the CLI only adds its cost.
+      this.ctx.usage(this.ctx.env.AGENTFLOOR_GATEWAY === "1" && this.spec.capabilities.gateway ? { costUsd: ev.usage.costUsd } : ev.usage);
+    }
   }
 
   async interrupt(): Promise<void> {

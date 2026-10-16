@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { memoryFile, officeInstructions } from "./briefing.ts";
+import { gatewayBase } from "../daemon/gateway.ts";
 import { cliRuntime, officeMcpServer, parseClaudeStyle, writeFile } from "./cli.ts";
 
 /**
@@ -11,7 +12,7 @@ import { cliRuntime, officeMcpServer, parseClaudeStyle, writeFile } from "./cli.
  */
 export const claudeCode = cliRuntime({
   id: "claude-code",
-  capabilities: { structuredOutput: true, resume: true, mcp: true, toolHooks: true, interrupt: true, memoryFile: "CLAUDE.md" },
+  capabilities: { structuredOutput: true, resume: true, mcp: true, toolHooks: true, interrupt: true, memoryFile: "CLAUDE.md", gateway: true },
 
   prepare(ctx) {
     writeFile(join(ctx.workdir, "CLAUDE.md"), memoryFile(ctx.agent, ctx.config));
@@ -47,7 +48,10 @@ export const claudeCode = cliRuntime({
     ];
     if (session) args.push("--resume", session);
     // The prompt goes on stdin so variadic flags can't swallow it.
-    return { cmd: "claude", args, stdin: input, env: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } };
+    const env: Record<string, string> = { CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
+    // Model calls go through the office's gateway, which counts tokens per agent and thread.
+    if (ctx.env.AGENTFLOOR_GATEWAY === "1") env.ANTHROPIC_BASE_URL = gatewayBase(ctx.env.AGENTFLOOR_URL!, ctx.env.AGENTFLOOR_TOKEN!, "anthropic");
+    return { cmd: "claude", args, stdin: input, env };
   },
 
   parser: () => parseClaudeStyle,

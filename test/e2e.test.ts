@@ -160,3 +160,71 @@ test("the scripted demo office plays every protocol path by itself", async (t) =
   assert.ok(lines.some((l) => /\[tester\] ✗ Work for Creator goes through their head/.test(l)), "cross-room work was refused");
   assert.ok(lines.some((l) => /\(mid-task\)/.test(l)), "a question reached a busy agent mid-task");
 });
+
+test("the model gateway passes calls through unchanged and counts tokens per agent and thread", async (t) => {
+  // A stand-in for Anthropic's Messages API, streaming server-sent events.
+  const { createServer } = await import("node:http");
+  const seen: { path?: string; auth?: string; body?: string } = {};
+  const sse = [
+    `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { model: "claude-haiku-test", usage: { input_tokens: 120, cache_read_input_tokens: 800, cache_creation_input_tokens: 30, output_tokens: 1 } } })}\n\n`,
+    `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "Hi" } })}\n\n`,
+    `event: message_delta\ndata: ${JSON.stringify({ type: "message_delta", usage: { output_tokens: 42 } })}\n\n`,
+    `event: message_stop\ndata: {"type":"message_stop"}\n\n`,
+  ];
+  const fake = createServer(async (req, res) => {
+    let body = "";
+    for await (const c of req) body += c;
+    Object.assign(seen, { path: req.url, auth: req.headers.authorization, body });
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    for (const e of sse) res.write(e);
+    res.end();
+  });
+  await new Promise<void>((ok) => fake.listen(0, "127.0.0.1", ok));
+  const prev = process.env.AGENTFLOOR_ANTHROPIC_BASE_URL;
+  process.env.AGENTFLOOR_ANTHROPIC_BASE_URL = `http://127.0.0.1:${(fake.address() as any).port}`;
+
+  const dir = tempDir();
+  const office = await startDaemon({
+    dataDir: dir,
+    startAgents: false,
+    log: () => {},
+    config: checkConfig({
+      name: "GW",
+      policy: DEFAULT_POLICY,
+      rooms: [{ id: "dev", name: "Dev", head: "pm" }],
+      agents: [
+        { id: "pm", name: "PM", room: "dev", role: "head", runtime: "claude-code", title: "" },
+        { id: "backend", name: "Backend", room: "dev", role: "member", runtime: "claude-code", title: "" },
+      ],
+    }),
+  });
+  t.after(async () => {
+    process.env.AGENTFLOOR_ANTHROPIC_BASE_URL = prev;
+    await office.close();
+    fake.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const o = office.office;
+  const { threadId } = o.ask("pm", { to: "backend", question: "Shape?" });
+  o.setWorkingOn("backend", [threadId]);
+
+  const base = office.envFor("backend").AGENTFLOOR_TOKEN!;
+  const res = await fetch(`${office.url}/gw/${base}/anthropic/v1/messages?beta=true`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer provider-credential" },
+    body: JSON.stringify({ model: "haiku", messages: [{ role: "user", content: "hi" }], stream: true }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), sse.join(""), "the response passes through byte for byte");
+  assert.equal(seen.path, "/v1/messages?beta=true");
+  assert.equal(seen.auth, "Bearer provider-credential", "provider credentials pass through");
+  assert.match(seen.body!, /"model":"haiku"/);
+
+  const usage = (o.snapshot().usage as any).backend;
+  assert.deepEqual([usage.inputTokens, usage.outputTokens, usage.cacheReadTokens, usage.calls], [950, 42, 800, 1]);
+  assert.equal(o.thread(threadId).tokens, 992);
+
+  const bad = await fetch(`${office.url}/gw/backend.forged/anthropic/v1/messages`, { method: "POST", body: "{}" });
+  assert.equal(bad.status, 401);
+});

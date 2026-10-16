@@ -82,6 +82,8 @@ export interface Thread {
   escalation: number;
   /** Messages sent in the thread (one per send, whatever the recipients). */
   sent: number;
+  /** Model tokens spent on this thread, as seen by the model gateway. */
+  tokens?: number;
   outcome: string | null;
   createdAt: number;
   updatedAt: number;

@@ -33,8 +33,13 @@ export interface OutputLine {
 
 export interface Usage {
   costUsd: number;
+  /** All input the model read, including cached input. */
   inputTokens: number;
   outputTokens: number;
+  /** The part of input served from the prompt cache. */
+  cacheReadTokens: number;
+  /** Model calls, as seen by the gateway. */
+  calls: number;
   turns: number;
 }
 
@@ -725,13 +730,46 @@ export class Office {
   }
 
   addUsage(agent: string, u: Partial<Usage>): void {
-    const cur = this.usage.get(agent) ?? { costUsd: 0, inputTokens: 0, outputTokens: 0, turns: 0 };
+    const cur = this.usage.get(agent) ?? { costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, calls: 0, turns: 0 };
     cur.costUsd += u.costUsd ?? 0;
     cur.inputTokens += u.inputTokens ?? 0;
     cur.outputTokens += u.outputTokens ?? 0;
+    cur.cacheReadTokens += u.cacheReadTokens ?? 0;
+    cur.calls += u.calls ?? 0;
     cur.turns += u.turns ?? 0;
     this.usage.set(agent, cur);
     this.emit("agent.usage", { agent, usage: cur });
+  }
+
+  /* -------------------------------------------- model gateway: activity */
+
+  private readonly activity = new Map<string, string>();
+  private readonly workingOn = new Map<string, string[]>();
+
+  /** What the agent is doing inside a turn ("thinking" while a model call is in flight). */
+  setActivity(agent: string, what: string | null): void {
+    if ((this.activity.get(agent) ?? null) === what) return;
+    if (what) this.activity.set(agent, what);
+    else this.activity.delete(agent);
+    this.bus.emit("event", { seq: 0, at: this.now(), type: "agent.activity", data: { agent, activity: what } } satisfies OfficeEvent);
+  }
+
+  /** The threads behind the agent's current turn, so model spend can be put against them. */
+  setWorkingOn(agent: string, threadIds: string[]): void {
+    this.workingOn.set(agent, [...new Set(threadIds)]);
+  }
+
+  /** One model call seen by the gateway: counts toward the agent and the thread it's working on. */
+  recordModelCall(agent: string, c: { provider: string; model: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }): void {
+    const input = c.inputTokens + c.cacheReadTokens + c.cacheWriteTokens;
+    this.addUsage(agent, { inputTokens: input, outputTokens: c.outputTokens, cacheReadTokens: c.cacheReadTokens, calls: 1 });
+    const threadId = this.workingOn.get(agent)?.[0];
+    const t = threadId ? this.store.getThread(threadId) : undefined;
+    if (t) {
+      t.tokens = (t.tokens ?? 0) + input + c.outputTokens;
+      this.store.putThread(t);
+    }
+    this.bus.emit("event", { seq: 0, at: this.now(), type: "model.call", data: { agent, threadId: threadId ?? null, ...c } } satisfies OfficeEvent);
   }
 
   /* ------------------------------------------------------------- snapshot */
@@ -739,6 +777,7 @@ export class Office {
   snapshot() {
     return {
       outputs: Object.fromEntries(this.config.agents.map((a) => [a.id, this.outputs.get(a.id) ?? []])),
+      activity: Object.fromEntries(this.activity),
       usage: Object.fromEntries(this.config.agents.map((a) => [a.id, this.usage.get(a.id) ?? null])),
       statuses: Object.fromEntries(
         this.config.agents.map((a) => [a.id, this.statuses.get(a.id) ?? { status: "offline", detail: "", at: 0 }]),

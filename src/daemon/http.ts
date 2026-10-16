@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Auth } from "../core/auth.ts";
 import type { Office } from "../core/office.ts";
 import { runTool } from "../core/tools.ts";
+import { handleGateway } from "./gateway.ts";
 import { CEO, OfficeError, type OfficeEvent } from "../core/types.ts";
 
 export interface HttpOptions {
@@ -25,6 +26,9 @@ export function createHttpServer({ office, auth, consoleHtml }: HttpOptions): Se
       const token = bearer(req) ?? url.searchParams.get("token") ?? undefined;
 
       if (req.method === "GET" && url.pathname === "/health") return json(res, 200, { ok: true });
+
+      // The model gateway authenticates by the agent token in its path.
+      if (url.pathname.startsWith("/gw/")) return await handleGateway(req, res, office, auth);
 
       if (req.method === "GET" && url.pathname === "/") {
         const html = readFileSync(consoleHtml, "utf8").replace("__CEO_TOKEN__", auth.tokenFor(CEO));

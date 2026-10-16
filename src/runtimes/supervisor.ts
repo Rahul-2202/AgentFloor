@@ -75,11 +75,12 @@ export class AgentHost {
     if (this.busy || this.stopped) return;
     const msgs = this.office.take(this.agent.id, "turn_end");
     if (!msgs.length) return;
-    await this.runTurn(this.office.render(msgs), describe(msgs), msgs.some((m) => m.urgency === "stop"));
+    await this.runTurn(this.office.render(msgs), describe(msgs), msgs.some((m) => m.urgency === "stop"), msgs.map((m) => m.threadId));
   }
 
-  private async runTurn(input: string, detail: string, halted: boolean): Promise<void> {
+  private async runTurn(input: string, detail: string, halted: boolean, threadIds: string[] = []): Promise<void> {
     this.busy = true;
+    this.office.setWorkingOn(this.agent.id, threadIds);
     this.office.setStatus(this.agent.id, "working", detail);
     try {
       await this.runtime.turn(input);
@@ -87,6 +88,8 @@ export class AgentHost {
       this.office.setStatus(this.agent.id, "idle", `turn failed: ${(err as Error).message}`);
     } finally {
       this.busy = false;
+      this.office.setWorkingOn(this.agent.id, []);
+      this.office.setActivity(this.agent.id, null);
     }
     if (this.stopped) return;
     this.office.setStatus(this.agent.id, halted ? "stopped" : "idle");
