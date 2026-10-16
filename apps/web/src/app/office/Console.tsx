@@ -569,7 +569,9 @@ function GitHubCard() {
   const [repos, setRepos] = useState<{ fullName: string }[] | null>(null);
   const [err, setErr] = useState("");
   const load = () => githubStatus().then(setStatus, (e) => setErr(e.message));
-  useEffect(() => void load(), []);
+  useEffect(() => {
+    void load();
+  }, []);
   if (!status) return null;
   return (
     <div className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-card)]">

@@ -23,6 +23,12 @@ export default function Home() {
         const { office, created } = await ensureOffice();
         if (!cancelled) setState({ kind: "office", session, office, created });
       } catch (err) {
+        // The sign-in this browser holds is for an account that's gone (or expired): start over.
+        if ((err as { status?: number }).status === 401) {
+          await supabase.auth.signOut();
+          if (!cancelled) setState({ kind: "signed-out", error: "Please sign in again." });
+          return;
+        }
         if (!cancelled) setState({ kind: "error", session, error: (err as Error).message });
       }
     }

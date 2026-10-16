@@ -201,3 +201,13 @@ test("triage, a meeting from a head's request, minutes that become memory and ta
   await until("audit", () => tables.audit.some((a) => a.action === "meeting.started"));
   void s;
 });
+
+test("opening Ada's chat twice at once greets once", async (t) => {
+  const { brain, chat } = await setup(t, async () => "Hi, I'm Ada.");
+  const [a, b] = await Promise.all([chat(""), chat("")]);
+  assert.equal(brain.runs.length, 1);
+  assert.equal(a.at(-1).message.content, "Hi, I'm Ada.");
+  assert.equal(b.at(-1).message.content, "Hi, I'm Ada.");
+  await chat(""); // later: the greeting is already there
+  assert.equal(brain.runs.length, 1);
+});

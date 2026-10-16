@@ -109,8 +109,13 @@ export async function buildApp(deps: Deps) {
 
     /** First sign-in: create the user's office. Safe to call again. */
     authed.post("/office", async (req, reply) => {
-      const { office, created } = await deps.offices.ensureOffice(req.user);
-      return reply.code(created ? 201 : 200).send({ office, created });
+      try {
+        const { office, created } = await deps.offices.ensureOffice(req.user);
+        return reply.code(created ? 201 : 200).send({ office, created });
+      } catch (err) {
+        if (err instanceof AuthError) return reply.code(401).send({ error: err.message, code: "account_gone" });
+        throw err;
+      }
     });
 
     /** Starts the office VM (creates it the first time) and waits for its daemon. */
