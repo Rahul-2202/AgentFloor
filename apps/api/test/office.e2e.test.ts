@@ -20,6 +20,7 @@ import { memoryLinkStore } from "../src/link/store.ts";
 import type { MachineStore } from "../src/machines/lifecycle.ts";
 import type { OfficeStore } from "../src/offices.ts";
 import { memoryProjectionStore } from "../src/projection/writer.ts";
+import { memoryMemoryStore } from "../src/memory/store.ts";
 import { createServices } from "../src/services.ts";
 import { memorySetupStore } from "../src/setup/store.ts";
 
@@ -57,7 +58,12 @@ async function setup(t: any) {
     ensureOffice: async () => ({ office: (await offices.officeOf("u1"))!, created: false }),
   };
   const machines: MachineStore = { get: async () => ({ sandboxId: null, state: "none" }), set: async () => {} };
-  const s = createServices({ verify: async () => USER, stores: { offices, link, setups, projections: proj.store, budgets, machines }, machine: null });
+  const memory = memoryMemoryStore();
+  const conversations = {
+    messages: async (_o: string, threadId: string) => [...tables.messages.values()].filter((m) => m.thread_id === threadId).sort((a, b) => a.created_at.localeCompare(b.created_at)),
+    openTasks: async () => [...tables.tasks.values()].filter((t) => t.status !== "done").map((t) => ({ owner: t.owner_id, title: t.title, details: t.details })),
+  };
+  const s = createServices({ verify: async () => USER, stores: { offices, link, setups, projections: proj.store, budgets, machines, memory, conversations }, machine: null });
   const app = await buildApp({ verify: async () => USER, offices, hub: s.hub, setup: s.setup, budgets: s.budgets, spend: budgets, watchers: s.watchers, webOrigins: [] });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const { port } = app.server.address() as AddressInfo;
@@ -75,7 +81,7 @@ async function setup(t: any) {
     await app.close();
   });
   const api = (method: "GET" | "POST", url: string, payload?: object) => app.inject({ method, url, payload, headers: { authorization: "Bearer x" } });
-  return { app, port, daemon, api, s, setups, tables };
+  return { app, port, daemon, api, s, setups, tables, memory };
 }
 
 test("the office runs the API's setup, and changes follow read-backs", async (t) => {
@@ -166,4 +172,43 @@ test("a browser watching the office gets live output", async (t) => {
   ws.send(JSON.stringify({ t: "takeover", agent: "backend" }));
   await until("the error", () => got.some((m) => m.t === "error"));
   ws.close();
+});
+
+test("memory through the office: agents write and read, briefs arrive, conversations become memory", async (t) => {
+  const { daemon, setups, memory, s } = await setup(t);
+  await until("setup", () => setups.rows.get(OFFICE)?.pushed === 1);
+  const o = daemon.office;
+
+  const saved = (await o.memory("backend", "write", { title: "Times in UTC", body: "Store times in UTC; show clinic local time", type: "lesson", confidence: 0.9 })) as any;
+  assert.equal(saved.status, "active");
+  const found = (await o.memory("backend", "search", { query: "UTC times" })) as any[];
+  assert.equal(found[0].title, "Times in UTC");
+  const read = (await o.memory("pm", "read", { id: found[0].id })) as any;
+  assert.match(read.body, /clinic local time/);
+  await assert.rejects(o.memory("backend", "write", { title: "x", body: "y", layer: "company" }), /Ada's/);
+  const review = (await o.memory("pm", "review", {})) as any;
+  assert.equal(review.lessons[0].title, "Times in UTC");
+
+  // The brief comes back to the office, for the agent's memory file.
+  await s.officeMemory!.pushBriefs(OFFICE);
+  await until("backend's brief", () => o.briefOf("backend").includes("Times in UTC"));
+
+  // A huddle between rooms ends: one shared agreement both rooms can read.
+  const { threadId } = o.huddle("pm", { with: "strategist", topic: "Launch date", opening: "Can we launch March 1?" });
+  o.reply("strategist", { threadId, text: "Yes if reminders slip." });
+  o.endHuddle("pm", { threadId, outcome: "Launch March 1; reminders in v1.1." });
+  await until("the agreement in memory", async () => (await memory.list(OFFICE, { scopes: [["conversation", threadId]] })).length === 1);
+  const [agreement] = await memory.list(OFFICE, { scopes: [["conversation", threadId]] });
+  assert.equal(agreement!.type, "agreement");
+  assert.deepEqual(agreement!.tags, ["agreement", "dev", "marketing"]);
+  const seen = (await o.memory("creator", "search", { query: "launch reminders" })) as any;
+  assert.ok(Array.isArray(seen) ? seen.length === 0 : /Nothing in memory/.test(seen), `a member who was not there does not see it: ${JSON.stringify(seen)}`);
+  assert.equal(((await o.memory("strategist", "search", { query: "launch reminders" })) as any[]).length, 1, "the other head does");
+
+  // The CEO answers a head's question: a decision in that room's log.
+  const ask = o.askCeo("pm", { question: "Which clinic launches first?" });
+  o.reply("ceo", { threadId: ask.threadId, text: "Sydney first.", resolves: true });
+  await until("the decision", async () => (await memory.list(OFFICE, { scopes: [["room", "dev"]], type: "decision" })).length === 1);
+  const [decision] = await memory.list(OFFICE, { scopes: [["room", "dev"]], type: "decision" });
+  assert.match(decision!.body, /The CEO decided: Sydney first/);
 });

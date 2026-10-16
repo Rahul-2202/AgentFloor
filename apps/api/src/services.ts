@@ -4,6 +4,9 @@
  */
 import type { Verify } from "./auth.ts";
 import { Budgets, type BudgetStore } from "./budgets.ts";
+import { OfficeMemory, type ConversationSource } from "./memory/office.ts";
+import { MemoryService } from "./memory/service.ts";
+import type { MemoryStore } from "./memory/store.ts";
 import type { GitHubApp } from "./github/app.ts";
 import { GitHubService, type GitHubStore } from "./github/service.ts";
 import { OfficeHub } from "./link/hub.ts";
@@ -24,6 +27,8 @@ export interface ServiceStores {
   budgets: BudgetStore;
   machines: MachineStore;
   github?: GitHubStore;
+  memory?: MemoryStore;
+  conversations?: ConversationSource;
 }
 
 export interface MachineConfig extends Omit<MachineOptions, "cloud" | "machines" | "link" | "connectedSince"> {
@@ -55,25 +60,41 @@ export function createServices(o: {
 
   const github =
     o.github && o.stores.github ? new GitHubService({ app: o.github.app, store: o.stores.github, hub, cloneUrlOf: o.github.cloneUrlOf }) : null;
-  if (github) {
-    setup.extras = async (id) => ({ repo: await github.repoRef(id) });
-    hub.onRequest = (id, name, args) => github.handle(id, name, args);
-  }
+  if (github) setup.extras = async (id) => ({ repo: await github.repoRef(id) });
+
+  const memory = o.stores.memory ? new MemoryService(o.stores.memory) : null;
+  const officeMemory =
+    memory && o.stores.conversations ? new OfficeMemory({ memory, setups: o.stores.setups, hub, source: o.stores.conversations }) : null;
+
+  // What the office asks the API for: memory, or GitHub (tokens, PRs).
+  hub.onRequest = async (id, name, args) => {
+    if (name === "memory") {
+      if (!officeMemory) throw new Error("Office memory isn't available on this server.");
+      return officeMemory.handle(id, args as { agent: string; op: string; args: Record<string, unknown> });
+    }
+    if (!github) throw new Error("GitHub isn't set up on this server yet.");
+    return github.handle(id, name, args);
+  };
 
   const warn = (what: string) => (err: Error) => log(`${what}: ${err.message}`);
   // A daemon (re)connects: give it its setup, catch the tables up, re-check budgets.
   hub.onConnect = (id) => {
     void setup.push(id).catch(warn("pushing setup"));
     void projector.catchUp(id).catch(warn("projecting"));
+    void officeMemory?.pushBriefs(id).catch(warn("briefs"));
   };
   hub.onConfigApplied = (id, v, ok) => void setup.confirmed(id, v, ok).catch(warn("setup confirm"));
   // Events stored: project them before acknowledging, so the UI is never behind the ack.
-  hub.onEvents = async (id) => void (await projector.catchUp(id));
+  hub.onEvents = async (id, events) => {
+    await projector.catchUp(id);
+    // Memory reads the projected tables, so it runs after them.
+    await officeMemory?.onEvents(id, events).catch(warn("memory"));
+  };
   projector.onUsage = (id) => void budgets.check(id).catch(warn("budgets"));
   hub.onLive = (id, ev) => watchers.broadcast(id, ev);
   if (machines) hub.onActivity = (id) => void machines.activity(id).catch(warn("keep-awake"));
 
-  return { hub, setup, projector, budgets, machines, watchers, github, stores: o.stores };
+  return { hub, setup, projector, budgets, machines, watchers, github, memory, officeMemory, stores: o.stores };
 }
 
 export type Services = ReturnType<typeof createServices>;

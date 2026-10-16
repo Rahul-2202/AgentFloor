@@ -217,7 +217,8 @@ export function memoryMemoryStore(): MemoryStore & { items: Map<string, MemoryIt
   const flags: MemoryFlag[] = [];
   const measures = new Map<string, number>();
   let clock = 0;
-  const stamp = () => new Date(Date.UTC(2026, 0, 1) + ++clock * 1000).toISOString();
+  // Real time, nudged forward so items made in the same millisecond still sort in order.
+  const stamp = () => new Date(Date.now() + ++clock).toISOString();
   const inScopes = (i: MemoryItem, scopes?: [Layer, string?][]) => !scopes || scopes.some(([l, s]) => i.layer === l && (s === undefined || i.scopeId === s));
   return {
     items,

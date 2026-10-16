@@ -5,6 +5,8 @@ import { supabaseBudgetStore } from "./budgets.ts";
 import { loadConfig } from "./config.ts";
 import { GitHubApp } from "./github/app.ts";
 import { supabaseGitHubStore } from "./github/service.ts";
+import { supabaseConversationSource } from "./memory/office.ts";
+import { supabaseMemoryStore } from "./memory/store.ts";
 import { supabaseLinkStore } from "./link/store.ts";
 import { daytonaCloud } from "./machines/cloud.ts";
 import { supabaseMachineStore } from "./machines/lifecycle.ts";
@@ -36,6 +38,8 @@ const s = createServices({
     budgets: supabaseBudgetStore(db),
     machines: supabaseMachineStore(db),
     github: supabaseGitHubStore(db),
+    memory: supabaseMemoryStore(db),
+    conversations: supabaseConversationSource(db),
   },
   github: config.github ? { app: new GitHubApp(config.github) } : null,
   machine: config.daytona

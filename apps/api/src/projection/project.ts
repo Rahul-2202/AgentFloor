@@ -115,7 +115,6 @@ export function project(officeId: string, events: OfficeEvent[], roomOf: (agent:
           body: i.body,
           state: i.state,
           action: i.action ?? null,
-          priority: i.kind === "approval" ? 1 : 2,
           created_at: iso(i.createdAt),
           resolved_at: i.state === "resolved" ? iso(ev.at) : null,
         });

@@ -156,6 +156,10 @@ test("connect GitHub, pick a repo, agents work in worktrees, open a PR, the CEO 
   // Backend does the work on a task branch and opens a PR.
   const { taskId } = daemon.office.requestWork("ceo", { to: "pm", title: "Slots API" });
   const sub = daemon.office.createTask("pm", { owner: "backend", title: "GET /slots", parentId: taskId });
+  // The first push asks the CEO (a first-use check); the CEO allows it.
+  await assert.rejects(daemon.office.openPr("backend", { title: "Nothing yet" }), /first time you push branches/);
+  const ask = daemon.office.store.inbox().find((i) => i.action?.type === "permission")!;
+  daemon.office.answerPermission(ask.id, true);
   await assert.rejects(daemon.office.openPr("backend", { title: "Nothing yet" }), /no commits beyond main/);
   git(wt, "checkout", "--quiet", "-b", `af/backend/${sub.taskId}`);
   writeFileSync(join(wt, "slots.ts"), "export const slots = [];\n");
@@ -166,7 +170,7 @@ test("connect GitHub, pick a repo, agents work in worktrees, open a PR, the CEO 
   assert.deepEqual([pr.number, pr.url, pr.branch], [7, "https://github.com/acme/web/pull/7", `af/backend/${sub.taskId}`]);
   assert.ok(git(bare, "branch", "--list", `af/backend/${sub.taskId}`), "branch pushed");
   const opened = gh.calls.find((c) => c.method === "POST" && c.path === "/repos/acme/web/pulls")!;
-  assert.deepEqual([opened.body.head, opened.body.base, opened.body.title], [`af/backend/${sub.taskId}`, "main", "GET /slots"]);
+  assert.deepEqual([opened.body.head, opened.body.base, opened.body.title, opened.body.draft], [`af/backend/${sub.taskId}`, "main", "GET /slots", true]);
   assert.match(opened.body.body, /Office task K-2: GET \/slots[\s\S]*Opened by Backend/);
   assert.equal(opened.auth, "Bearer ghs_web");
   assert.equal(daemon.office.store.getTask(sub.taskId)!.outputs![0]!.url, "https://github.com/acme/web/pull/7");
