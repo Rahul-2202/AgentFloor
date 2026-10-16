@@ -8,11 +8,14 @@ export interface Cloud {
     env: Record<string, string>;
     /** env var name → name of a provider secret (the VM only ever sees a placeholder). */
     secrets: Record<string, string>;
-    autoPauseMinutes: number;
+    /** VMs pause when idle (memory kept); containers stop. */
+    kind: "vm" | "container";
+    idleMinutes: number;
   }): Promise<{ id: string }>;
   state(id: string): Promise<string>;
   start(id: string): Promise<void>;
   pause(id: string): Promise<void>;
+  stop(id: string): Promise<void>;
   /** Counts as activity, so the VM doesn't auto-pause. */
   touch(id: string): Promise<void>;
   /** Runs a command in the background (survives this call), in a named session. */
@@ -32,7 +35,7 @@ export function daytonaCloud(apiKey: string): Cloud {
           envVars: o.env,
           secrets: o.secrets,
           public: false,
-          autoPauseInterval: o.autoPauseMinutes,
+          ...(o.kind === "vm" ? { autoPauseInterval: o.idleMinutes } : { autoStopInterval: o.idleMinutes }),
         },
         { timeout: 300 },
       );
@@ -46,6 +49,9 @@ export function daytonaCloud(apiKey: string): Cloud {
     },
     async pause(id) {
       await (await get(id)).pause(120);
+    },
+    async stop(id) {
+      await (await get(id)).stop(120);
     },
     async touch(id) {
       await (await get(id)).refreshActivity();

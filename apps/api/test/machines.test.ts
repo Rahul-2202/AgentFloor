@@ -59,6 +59,10 @@ function fakeCloud() {
       await v.daemon?.link?.stop();
       v.state = "paused";
     },
+    async stop(id) {
+      calls.push("stop");
+      await stop(id);
+    },
     async touch() {
       calls.push("touch");
     },
@@ -103,7 +107,7 @@ function memoryMachines(): MachineStore & { rows: Map<string, { sandboxId: strin
   };
 }
 
-async function setup(t: any, opts: { linkUrl?: string } = {}) {
+async function setup(t: any, opts: { linkUrl?: string; kind?: "vm" | "container" } = {}) {
   const officeId = randomUUID();
   const link = memoryLinkStore();
   const hub = new OfficeHub(link);
@@ -133,6 +137,7 @@ async function setup(t: any, opts: { linkUrl?: string } = {}) {
     snapshot: "agentfloor-office-test",
     linkUrl: opts.linkUrl ?? `ws://127.0.0.1:${port}${LINK_PATH}`,
     claudeSecret: "agentfloor-claude-token",
+    kind: opts.kind ?? "vm",
     connectTimeoutMs: 3000,
     resumeGraceMs: 500,
     touchEveryMs: 60_000,
@@ -180,6 +185,17 @@ test("pause keeps the daemon; resuming reconnects it without a restart", async (
 
   assert.equal((await s.post("/office/start")).json().state, "started");
   assert.deepEqual(s.fake.calls, ["create", "daemon", "pause", "start"], "resumed, not restarted");
+});
+
+test("containers stop instead of pausing, and starting restarts the daemon right away", async (t) => {
+  const s = await setup(t, { kind: "container" });
+  await s.post("/office/start");
+  assert.equal((await s.post("/office/pause")).json().state, "stopped");
+  const t0 = Date.now();
+  assert.equal((await s.post("/office/start")).json().state, "started");
+  assert.ok(Date.now() - t0 < 2000, "no waiting for a daemon that can't come back");
+  assert.deepEqual(s.fake.calls, ["create", "daemon", "stop", "start", "daemon"]);
+  assert.ok(s.hub.isConnected(s.officeId));
 });
 
 test("after a full stop, starting brings the daemon back up", async (t) => {
