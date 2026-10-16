@@ -4,14 +4,49 @@
     {
       "name": "office",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "daemon"],
+      "runtimeArgs": [
+        "run",
+        "daemon"
+      ],
       "port": 4300
     },
     {
       "name": "office-demo",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "daemon", "--", "--config", "config/demo-scripted.json", "--data", "data-demo", "--port", "4301"],
+      "runtimeArgs": [
+        "run",
+        "daemon",
+        "--",
+        "--config",
+        "config/demo-scripted.json",
+        "--data",
+        "data-demo",
+        "--port",
+        "4301"
+      ],
       "port": 4301
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@agentfloor/api"
+      ],
+      "port": 4000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "@agentfloor/web"
+      ],
+      "port": 3000
     }
   ]
 }

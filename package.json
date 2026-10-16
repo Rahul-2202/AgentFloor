@@ -18,7 +18,11 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "railway": "^3.16.0",
     "supabase": "^2.121.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }
