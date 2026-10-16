@@ -56,7 +56,19 @@ export function toDaemonConfig(s: OfficeSetup): OfficeConfig {
   };
 }
 
-/** A new office, until Ada's onboarding (M3) builds one with the CEO. */
+/** A new office: empty, until Ada's onboarding builds it with the CEO. */
+export function emptySetup(name: string): OfficeSetup {
+  return {
+    name,
+    policy: { ...DEFAULT_POLICY },
+    rooms: [],
+    agents: [],
+    budgets: [{ scope: "office", id: "", dailyUsdSoft: 5, dailyUsdHard: 20 }],
+    locks: ["merge"],
+  };
+}
+
+/** A sample office (two rooms, six agents), for tests and demos. */
 export function defaultSetup(name: string): OfficeSetup {
   const agent = (id: string, nm: string, room: string, role: "head" | "member", title: string): AgentDef => ({
     id,

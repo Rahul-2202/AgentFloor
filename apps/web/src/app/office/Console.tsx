@@ -114,6 +114,7 @@ const DOT: Record<string, string> = { working: "bg-ok", waiting: "bg-warn", idle
 
 function Team({ data, live, onOpen }: { data: OfficeData; live: ReturnType<typeof useLive>; onOpen: (id: string) => void }) {
   if (!data.loaded) return <p className="text-faint">Loading…</p>;
+  if (!data.rooms.length) return <p className="text-faint">No rooms yet. Ada sets up your office with you: open Ada to start.</p>;
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {data.rooms.map((room) => (
