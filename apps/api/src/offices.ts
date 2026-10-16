@@ -33,10 +33,12 @@ export function defaultOfficeName(user: User): string {
   return who ? `${who}'s office` : "My office";
 }
 
-export function supabaseOfficeStore(url: string, secretKey: string): OfficeStore {
-  const db: SupabaseClient = createClient(url, secretKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+/** A server-side Supabase client (service role: bypasses row-level security). */
+export function serviceClient(url: string, secretKey: string): SupabaseClient {
+  return createClient(url, secretKey, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+export function supabaseOfficeStore(db: SupabaseClient): OfficeStore {
 
   async function officeOf(userId: string): Promise<Office | null> {
     const { data, error } = await db.from("offices").select(COLUMNS).eq("owner_id", userId).maybeSingle();

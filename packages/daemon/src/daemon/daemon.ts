@@ -12,6 +12,7 @@ import { IDENTITY_FILE, OfficeClient } from "../client.ts";
 import { RUNTIMES } from "../runtimes/index.ts";
 import { AgentHost } from "../runtimes/supervisor.ts";
 import { createHttpServer } from "./http.ts";
+import { OfficeLink } from "./link.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -28,6 +29,8 @@ export interface DaemonOptions {
   now?: () => number;
   tickMs?: number;
   log?: (line: string) => void;
+  /** Connect to the Control API (in the office VM): its link URL and this office's token. */
+  link?: { url: string; token: string };
 }
 
 export interface RunningOffice {
@@ -35,6 +38,7 @@ export interface RunningOffice {
   auth: Auth;
   url: string;
   hosts: AgentHost[];
+  link: OfficeLink | null;
   /** Environment for an agent's process: who it is and how to reach the office. */
   envFor(agentId: string): Record<string, string>;
   close(): Promise<void>;
@@ -128,14 +132,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
   };
   office.bus.on("event", onConfigured);
 
+  const link = opts.link ? new OfficeLink({ office, ...opts.link, log: (l) => log(`[link] ${l}`) }) : null;
+  link?.start();
+
   return {
     office,
     auth,
     url,
     hosts,
+    link,
     envFor,
     async close() {
       clearInterval(tick);
+      await link?.stop();
       office.bus.off("event", onConfigured);
       await Promise.all(hosts.map((h) => h.stop()));
       server.closeAllConnections();

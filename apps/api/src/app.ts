@@ -1,11 +1,18 @@
 import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
+import { LINK_PATH } from "@agentfloor/shared/link";
 import Fastify, { type FastifyRequest } from "fastify";
 import { AuthError, bearer, type User, type Verify } from "./auth.ts";
+import { LinkError, type OfficeHub } from "./link/hub.ts";
+import type { OfficeMachines } from "./machines/lifecycle.ts";
 import type { OfficeStore } from "./offices.ts";
 
 export interface Deps {
   verify: Verify;
   offices: OfficeStore;
+  hub: OfficeHub;
+  /** Office VMs; null when Daytona isn't configured. */
+  machines?: OfficeMachines | null;
   webOrigins: string[];
   logger?: boolean;
 }
@@ -20,7 +27,13 @@ export async function buildApp(deps: Deps) {
   const app = Fastify({ logger: deps.logger ?? false });
   await app.register(cors, { origin: deps.webOrigins, credentials: false });
 
+  await app.register(websocket, { options: { maxPayload: 4 * 1024 * 1024 } });
+
   app.get("/health", async () => ({ ok: true }));
+
+  // Office daemons dial in here; they authenticate with their office token
+  // in the first message (see packages/shared/src/link.ts).
+  app.get(LINK_PATH, { websocket: true }, (socket) => deps.hub.accept(socket));
 
   // Everything below needs a signed-in user (a Supabase access token).
   app.register(async (authed) => {
@@ -43,6 +56,39 @@ export async function buildApp(deps: Deps) {
     authed.post("/office", async (req, reply) => {
       const { office, created } = await deps.offices.ensureOffice(req.user);
       return reply.code(created ? 201 : 200).send({ office, created });
+    });
+
+    /** Starts the office VM (creates it the first time) and waits for its daemon. */
+    authed.post("/office/start", async (req, reply) => {
+      if (!deps.machines) return reply.code(503).send({ error: "Office computers aren't set up on this server." });
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      try {
+        return { state: await deps.machines.start(office.id) };
+      } catch (err) {
+        return reply.code(502).send({ error: `Couldn't start your office: ${(err as Error).message}` });
+      }
+    });
+
+    authed.post("/office/pause", async (req, reply) => {
+      if (!deps.machines) return reply.code(503).send({ error: "Office computers aren't set up on this server." });
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      return { state: await deps.machines.pause(office.id) };
+    });
+
+    /** Runs an office call (the daemon's CEO tools) in the user's office. */
+    authed.post<{ Body: { name?: unknown; args?: unknown } }>("/office/call", async (req, reply) => {
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      if (typeof req.body?.name !== "string") return reply.code(400).send({ error: "name is required" });
+      try {
+        return { result: await deps.hub.call(office.id, req.body.name, req.body.args ?? {}) };
+      } catch (err) {
+        if (!(err instanceof LinkError)) throw err;
+        const status = err.code === "office_offline" ? 503 : err.code === "timeout" ? 504 : 400;
+        return reply.code(status).send({ error: err.message, code: err.code });
+      }
     });
   });
 

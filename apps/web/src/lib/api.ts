@@ -23,3 +23,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Creates the office on first sign-in; returns it either way. */
 export const ensureOffice = () => api<{ office: Office; created: boolean }>("/office", { method: "POST" });
+
+/** Starts the office computer (creates it the first time); resolves when its daemon is connected. */
+export const startOffice = () => api<{ state: string }>("/office/start", { method: "POST" });
+export const pauseOffice = () => api<{ state: string }>("/office/pause", { method: "POST" });

@@ -19,5 +19,10 @@
   "private": true,
   "bin": {
     "office": "bin/office"
+  },
+  "exports": {
+    "./daemon": "./src/daemon/daemon.ts",
+    "./config": "./src/core/config.ts",
+    "./link": "./src/daemon/link.ts"
   }
 }

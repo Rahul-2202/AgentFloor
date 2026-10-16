@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
 import { buildApp } from "../src/app.ts";
+import { OfficeHub } from "../src/link/hub.ts";
+import { memoryLinkStore } from "../src/link/store.ts";
 import { makeVerifier, type User } from "../src/auth.ts";
 import { loadConfig } from "../src/config.ts";
 import { defaultOfficeName, type Office, type OfficeStore } from "../src/offices.ts";
@@ -45,6 +47,7 @@ async function setup() {
   const app = await buildApp({
     verify: makeVerifier({ jwksUrl: "unused", issuer: ISSUER, keys: k.jwks }),
     offices: store,
+    hub: new OfficeHub(memoryLinkStore()),
     webOrigins: ["http://localhost:3000"],
   });
   return { app, store, sign: k.sign };
