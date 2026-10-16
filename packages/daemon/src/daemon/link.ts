@@ -34,9 +34,14 @@ export class OfficeLink {
   private retryTimer: NodeJS.Timeout | null = null;
   private backoff = 500;
   private stopped = false;
+  private readonly requests = new Map<string, { ok: (v: unknown) => void; fail: (e: Error) => void; timer: NodeJS.Timeout }>();
+  private nextRequest = 1;
   private readonly log: (line: string) => void;
   private readonly onEvent = (ev: OfficeEvent) => {
-    if (this.state !== "open" || ev.seq <= this.sent) return;
+    if (this.state !== "open") return;
+    // seq 0: live-only (session output, "thinking"); sent straight on, never replayed.
+    if (ev.seq === 0) return this.send({ t: "live", event: ev });
+    if (ev.seq <= this.sent) return;
     this.pending.push(ev);
     this.flushTimer ??= setTimeout(() => this.flush(), this.opts.batchMs ?? 100);
   };
@@ -71,6 +76,20 @@ export class OfficeLink {
     this.state = "closed";
   }
 
+  /** Asks the Control API for something (a git token, a PR opened). Fails if the link is down. */
+  request(name: string, args: unknown, timeoutMs = 30_000): Promise<unknown> {
+    if (this.state !== "open") return Promise.reject(new OfficeError("offline", "The office isn't connected to AgentFloor right now; try again in a moment."));
+    const id = `r${this.nextRequest++}`;
+    return new Promise((ok, fail) => {
+      const timer = setTimeout(() => {
+        this.requests.delete(id);
+        fail(new OfficeError("timeout", `AgentFloor didn't answer "${name}" in time.`));
+      }, timeoutMs);
+      this.requests.set(id, { ok, fail, timer });
+      this.send({ t: "request", id, name, args });
+    });
+  }
+
   private connect(): void {
     this.state = "connecting";
     const ws = new WebSocket(this.opts.url);
@@ -84,6 +103,11 @@ export class OfficeLink {
       if (this.flushTimer) clearTimeout(this.flushTimer);
       this.flushTimer = null;
       this.pending = [];
+      for (const r of this.requests.values()) {
+        clearTimeout(r.timer);
+        r.fail(new OfficeError("offline", "The connection to AgentFloor dropped; try again in a moment."));
+      }
+      this.requests.clear();
       if (e.code === CLOSE_BAD_TOKEN) {
         this.state = "rejected";
         this.log("the API rejected the office token; not retrying");
@@ -114,6 +138,24 @@ export class OfficeLink {
         return;
       case "call":
         void this.call(msg.id, msg.name, msg.args);
+        return;
+      case "response": {
+        const r = this.requests.get(msg.id);
+        if (!r) return;
+        this.requests.delete(msg.id);
+        clearTimeout(r.timer);
+        if (msg.ok) r.ok(msg.result);
+        else r.fail(new OfficeError(msg.error.code, msg.error.message));
+        return;
+      }
+      case "config":
+        try {
+          this.opts.office.applyConfig(msg.config);
+          this.send({ t: "config_applied", version: msg.version, ok: true });
+        } catch (err) {
+          this.log(`couldn't apply office setup v${msg.version}: ${(err as Error).message}`);
+          this.send({ t: "config_applied", version: msg.version, ok: false, error: (err as Error).message });
+        }
         return;
     }
   }

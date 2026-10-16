@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -7,12 +7,14 @@ import { Auth } from "../core/auth.ts";
 import { Office } from "../core/office.ts";
 import { Store } from "../core/store.ts";
 import { CATALOG } from "../core/catalog.ts";
-import type { AgentDef, OfficeConfig, OfficeEvent } from "../core/types.ts";
+import { loadConfig } from "../core/config.ts";
+import { OFFICE, type AgentDef, type OfficeConfig, type OfficeEvent } from "../core/types.ts";
 import { IDENTITY_FILE, OfficeClient } from "../client.ts";
 import { RUNTIMES } from "../runtimes/index.ts";
 import { AgentHost } from "../runtimes/supervisor.ts";
 import { createHttpServer } from "./http.ts";
 import { OfficeLink } from "./link.ts";
+import { OfficeRepo } from "./repo.ts";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -48,9 +50,12 @@ export interface RunningOffice {
 export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
   const log = opts.log ?? ((l: string) => console.log(l));
   mkdirSync(opts.dataDir, { recursive: true });
+  // The setup the Control API last pushed wins over the starting config.
+  const savedConfig = join(opts.dataDir, "office-config.json");
+  const config = opts.link && existsSync(savedConfig) ? loadConfig(savedConfig) : opts.config;
   const store = new Store(join(opts.dataDir, "office.db"));
   const auth = Auth.fromFile(join(opts.dataDir, "secret"));
-  const office = new Office(opts.config, store, { now: opts.now });
+  const office = new Office(config, store, { now: opts.now });
 
   const server = createHttpServer({ office, auth, consoleHtml: join(ROOT, "console/index.html") });
   await new Promise<void>((ok) => server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", ok));
@@ -76,8 +81,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     env.AGENTFLOOR_TOKEN = auth.tokenFor(agentId);
     env.AGENTFLOOR_GATEWAY = opts.gateway === false ? "0" : "1";
     env.PATH = `${join(ROOT, "bin")}:${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`;
+    // Commits show which agent made them.
+    const name = config.agents.find((a) => a.id === agentId)?.name ?? agentId;
+    env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = `${name} (AgentFloor)`;
+    env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = `${agentId}@agents.agentfloor.dev`;
     return env;
   };
+
+  // The office's GitHub repo, once connected: a clone plus a worktree per agent.
+  const repo = new OfficeRepo({
+    dataDir: opts.dataDir,
+    root: ROOT,
+    env: { AGENTFLOOR_URL: url, AGENTFLOOR_TOKEN: auth.tokenFor(OFFICE), PATH: `${join(ROOT, "bin")}:${process.env.PATH ?? ""}` },
+  });
+  office.hooks.push = (agent) => repo.push(agent);
+  const useRepo = async (): Promise<boolean> => {
+    if (!config.repo) return false;
+    try {
+      await repo.ensure(config.repo);
+      return true;
+    } catch (err) {
+      log(`[repo] couldn't get ${config.repo.fullName}: ${(err as Error).message}`);
+      return false;
+    }
+  };
+  let inRepo = await useRepo();
 
   const hosts: AgentHost[] = [];
   const makeRuntime = (agent: AgentDef) => {
@@ -86,10 +114,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     const dir = resolve(opts.dataDir, "agents", agent.id);
     return factory({
       agent,
-      config: opts.config,
+      config,
       office: new OfficeClient(url, auth.tokenFor(agent.id)),
       home: dir,
-      workdir: join(dir, "work"),
+      workdir: inRepo ? repo.worktreeOf(agent.id) : join(dir, "work"),
+      inRepo,
       env: envFor(agent.id),
       root: ROOT,
       log: (line) => log(`[${agent.id}] ${line}`),
@@ -98,20 +127,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     });
   };
 
-  for (const agent of opts.config.agents) {
+  /** The agent's folders and identity files; its host, if the office runs its runtime. */
+  const prepare = async (agent: AgentDef): Promise<AgentHost | null> => {
     const dir = resolve(opts.dataDir, "agents", agent.id);
     const workdir = join(dir, "work");
     mkdirSync(join(workdir, ".agentfloor"), { recursive: true });
+    if (inRepo) await repo.ensureWorktree(agent.id).catch((err) => log(`[repo] worktree for ${agent.id}: ${err.message}`));
     const env = envFor(agent.id);
-    // Found from the working folder by CLIs that don't pass their environment on.
-    writeFileSync(join(workdir, IDENTITY_FILE), JSON.stringify({ url, agent: agent.id, token: env.AGENTFLOOR_TOKEN }, null, 2), { mode: 0o600 });
+    // Found from the working folder (or a folder above it) by CLIs that don't pass their environment on.
+    const identity = JSON.stringify({ url, agent: agent.id, token: env.AGENTFLOOR_TOKEN }, null, 2);
+    writeFileSync(join(workdir, IDENTITY_FILE), identity, { mode: 0o600 });
+    mkdirSync(join(dir, ".agentfloor"), { recursive: true });
+    writeFileSync(join(dir, IDENTITY_FILE), identity, { mode: 0o600 });
     // For starting an external agent's CLI by hand: `source data/agents/<id>/env`.
     const exported = ["AGENTFLOOR_URL", "AGENTFLOOR_AGENT", "AGENTFLOOR_TOKEN", "PATH"].map((k) => `export ${k}='${env[k]}'`);
     writeFileSync(join(dir, "env"), exported.join("\n") + "\n", { mode: 0o600 });
-
-    if (opts.startAgents === false) continue;
+    if (opts.startAgents === false) return null;
     const runtime = makeRuntime(agent);
-    if (runtime) hosts.push(new AgentHost(office, agent, runtime));
+    return runtime ? new AgentHost(office, agent, runtime) : null;
+  };
+
+  for (const agent of config.agents) {
+    const host = await prepare(agent);
+    if (host) hosts.push(host);
   }
   await Promise.all(hosts.map((h) => h.start()));
 
@@ -132,7 +170,40 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
   };
   office.bus.on("event", onConfigured);
 
+  // The Control API pushed a new setup: start, stop or restart the agents it touched.
+  const onSetup = async (ev: OfficeEvent) => {
+    if (ev.type !== "config.applied") return;
+    writeFileSync(savedConfig, JSON.stringify(config, null, 2));
+    const { added, removed, changed, repoChanged } = ev.data as { added: string[]; removed: string[]; changed: string[]; repoChanged?: boolean };
+    if (repoChanged) {
+      inRepo = await useRepo();
+      if (inRepo) for (const a of config.agents) await repo.ensureWorktree(a.id).catch((err) => log(`[repo] worktree for ${a.id}: ${err.message}`));
+    }
+    for (const id of removed) {
+      const i = hosts.findIndex((h) => h.agent.id === id);
+      if (i >= 0) void hosts.splice(i, 1)[0]!.stop();
+    }
+    for (const id of added) {
+      const host = await prepare(office.agent(id));
+      if (host) {
+        hosts.push(host);
+        void host.start();
+      }
+    }
+    if (opts.startAgents === false) return;
+    for (const id of changed) {
+      const agent = office.agent(id);
+      const runtime = makeRuntime(agent);
+      const host = hosts.find((h) => h.agent.id === id);
+      // The new runtime rewrites the agent's memory file from its new settings.
+      if (runtime && host) void host.swap(runtime, `${CATALOG[agent.runtime]?.label ?? agent.runtime}, ${agent.model}`);
+    }
+  };
+  const onSetupEvent = (ev: OfficeEvent) => void onSetup(ev).catch((err) => log(`[setup] ${(err as Error).message}`));
+  office.bus.on("event", onSetupEvent);
+
   const link = opts.link ? new OfficeLink({ office, ...opts.link, log: (l) => log(`[link] ${l}`) }) : null;
+  if (link) office.hooks.api = (name, args) => link.request(name, args);
   link?.start();
 
   return {
@@ -146,6 +217,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
       clearInterval(tick);
       await link?.stop();
       office.bus.off("event", onConfigured);
+      office.bus.off("event", onSetupEvent);
       await Promise.all(hosts.map((h) => h.stop()));
       server.closeAllConnections();
       await new Promise<void>((ok) => server.close(() => ok()));

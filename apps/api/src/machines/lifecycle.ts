@@ -6,7 +6,8 @@ import type { Cloud } from "./cloud.ts";
 /** Where the office VM's id and state are kept (offices table). */
 export interface MachineStore {
   get(officeId: string): Promise<{ sandboxId: string | null; state: string }>;
-  set(officeId: string, patch: { sandboxId?: string; state: string; error?: string | null }): Promise<void>;
+  /** sandboxId: a new machine's id, or null when it's gone. */
+  set(officeId: string, patch: { sandboxId?: string | null; state: string; error?: string | null }): Promise<void>;
 }
 
 export function supabaseMachineStore(db: SupabaseClient): MachineStore {
@@ -18,7 +19,7 @@ export function supabaseMachineStore(db: SupabaseClient): MachineStore {
     },
     async set(officeId, p) {
       const row: Record<string, unknown> = { sandbox_state: p.state, sandbox_error: p.error ?? null };
-      if (p.sandboxId) row.sandbox_id = p.sandboxId;
+      if (p.sandboxId !== undefined) row.sandbox_id = p.sandboxId;
       const { error } = await db.from("offices").update(row).eq("id", officeId);
       if (error) throw new Error(`saving office machine: ${error.message}`);
     },
@@ -118,6 +119,15 @@ export class OfficeMachines {
     let m = await this.o.machines.get(officeId);
     let since = 0;
     try {
+      // A machine deleted outside AgentFloor (or destroyed by the provider): start afresh.
+      if (m.sandboxId) {
+        const state = await this.o.cloud.state(m.sandboxId).catch((err: Error) => (/not found/i.test(err.message) ? "destroyed" : Promise.reject(err)));
+        if (state === "destroyed" || state === "destroying") {
+          log(`office ${officeId}: machine ${m.sandboxId} is gone; creating a new one`);
+          await this.o.machines.set(officeId, { sandboxId: null, state: "none" });
+          m = { sandboxId: null, state: "none" };
+        }
+      }
       if (!m.sandboxId) {
         await this.o.machines.set(officeId, { state: "creating" });
         // A fresh token per VM; only its hash is kept.

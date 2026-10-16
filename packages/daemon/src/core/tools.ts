@@ -110,21 +110,45 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "create_task",
     who: "agent",
-    description: "Heads only: assign a task to an agent in your room.",
-    shape: { owner: z.string(), title: z.string(), details: z.string().optional() },
-    run: (o, me, a) => o.createTask(me, { owner: a.owner, title: a.title, details: a.details }),
+    description: "Heads only: assign a task to an agent in your room. To plan a bigger task, split it into subtasks with parent_task.",
+    shape: {
+      owner: z.string(),
+      title: z.string(),
+      details: z.string().optional(),
+      done_means: z.string().optional().describe("What done looks like, so the owner knows when to stop."),
+      parent_task: z.string().optional().describe("The task this is part of."),
+    },
+    run: (o, me, a) => o.createTask(me, { owner: a.owner, title: a.title, details: a.details, dod: a.done_means, parentId: a.parent_task }),
   },
   {
     name: "update_task",
     who: "agent",
-    description: "Update a task you own: status, progress (0-100) and a short note. The office and the CEO see this.",
+    description:
+      "Update a task you own: status, progress (0-100), a short note, the step you're on, what's blocking you, its checklist, or an output (a PR, file or link). The office and the CEO see this.",
     shape: {
       task_id: z.string(),
       status: z.enum(["queued", "ongoing", "blocked", "review", "done"]).optional(),
       progress: z.number().optional(),
       note: z.string().optional(),
+      step: z.string().optional().describe("What you're doing now, in a few words."),
+      blocker: z.string().optional().describe("What's in the way (with status blocked)."),
+      checklist: z.array(z.object({ text: z.string(), done: z.boolean() })).optional().describe("Replaces the task's checklist."),
+      output: z
+        .object({ kind: z.enum(["pr", "file", "link"]), title: z.string(), url: z.string().optional() })
+        .optional()
+        .describe("Something the task produced."),
     },
-    run: (o, me, a) => o.updateTask(me, { taskId: a.task_id, status: a.status, progress: a.progress, note: a.note }),
+    run: (o, me, a) =>
+      o.updateTask(me, {
+        taskId: a.task_id,
+        status: a.status,
+        progress: a.progress,
+        note: a.note,
+        step: a.step,
+        blocker: a.blocker,
+        checklist: a.checklist,
+        output: a.output,
+      }),
   },
   {
     name: "inbox",
@@ -148,7 +172,35 @@ export const TOOLS: ToolSpec[] = [
     },
   },
 
+  {
+    name: "open_pr",
+    who: "agent",
+    description:
+      "Push your current branch and open a pull request for it on the office's GitHub repo. Commit first. Link it to your task so it shows as an output. You can't merge: your head asks the CEO with request_merge.",
+    shape: {
+      title: z.string(),
+      body: z.string().optional().describe("What changed and how you checked it."),
+      task_id: z.string().optional(),
+      draft: z.boolean().optional(),
+    },
+    run: (o, me, a) => o.openPr(me, { title: a.title, body: a.body, taskId: a.task_id, draft: a.draft }),
+  },
+  {
+    name: "request_merge",
+    who: "agent",
+    description: "Heads only: ask the CEO to merge a PR from your room. Only the CEO merges.",
+    shape: { pr: z.number().describe("The PR number."), summary: z.string().describe("What it does and why it's ready."), task_id: z.string().optional() },
+    run: (o, me, a) => o.requestMerge(me, { pr: a.pr, summary: a.summary, taskId: a.task_id }),
+  },
+
   /* Runtime adapters and hooks: pull what's due at a delivery point. */
+  {
+    name: "git_credential",
+    who: "runtime",
+    description: "A short-lived token for git to reach the office's repo (used by the git credential helper).",
+    shape: {},
+    run: (o) => o.gitToken(),
+  },
   {
     name: "delivery",
     who: "runtime",
@@ -179,8 +231,8 @@ export const TOOLS: ToolSpec[] = [
     name: "ceo_assign",
     who: "ceo",
     description: "Give an agent a task.",
-    shape: { to: z.string(), title: z.string(), details: z.string().optional() },
-    run: (o, _me, a) => o.requestWork(CEO, { to: a.to, title: a.title, details: a.details }),
+    shape: { to: z.string(), title: z.string(), details: z.string().optional(), done_means: z.string().optional() },
+    run: (o, _me, a) => o.requestWork(CEO, { to: a.to, title: a.title, details: a.details, dod: a.done_means }),
   },
   {
     name: "ceo_configure_agent",
@@ -201,6 +253,27 @@ export const TOOLS: ToolSpec[] = [
     description: "Mark an inbox item done.",
     shape: { id: z.string() },
     run: (o, _me, a) => o.resolveInbox(a.id),
+  },
+  {
+    name: "ceo_hold_agent",
+    who: "ceo",
+    description: "Park an agent: its current turn stops and no new one starts until released (budget reached, terminal taken over).",
+    shape: { agent: z.string(), reason: z.string() },
+    run: (o, _me, a) => o.hold(a.agent, a.reason),
+  },
+  {
+    name: "ceo_release_agent",
+    who: "ceo",
+    description: "Let a parked agent carry on.",
+    shape: { agent: z.string() },
+    run: (o, _me, a) => o.release(a.agent),
+  },
+  {
+    name: "agent_output",
+    who: "ceo",
+    description: "An agent's recent live session lines, for opening its terminal.",
+    shape: { agent: z.string() },
+    run: (o, _me, a) => o.outputOf(a.agent),
   },
 ];
 

@@ -9,7 +9,9 @@
     "./types": "./src/types.ts",
     "./catalog": "./src/catalog.ts",
     "./env": "./src/env.ts",
-    "./link": "./src/link.ts"
+    "./link": "./src/link.ts",
+    "./setup": "./src/setup.ts",
+    "./prices": "./src/prices.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

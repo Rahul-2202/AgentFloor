@@ -1,12 +1,17 @@
 import { loadEnv } from "@agentfloor/shared/env";
 import { buildApp } from "./app.ts";
 import { makeVerifier } from "./auth.ts";
+import { supabaseBudgetStore } from "./budgets.ts";
 import { loadConfig } from "./config.ts";
-import { OfficeHub } from "./link/hub.ts";
+import { GitHubApp } from "./github/app.ts";
+import { supabaseGitHubStore } from "./github/service.ts";
 import { supabaseLinkStore } from "./link/store.ts";
 import { daytonaCloud } from "./machines/cloud.ts";
-import { OfficeMachines, supabaseMachineStore } from "./machines/lifecycle.ts";
+import { supabaseMachineStore } from "./machines/lifecycle.ts";
 import { serviceClient, supabaseOfficeStore } from "./offices.ts";
+import { supabaseProjectionStore } from "./projection/writer.ts";
+import { createServices } from "./services.ts";
+import { supabaseSetupStore } from "./setup/store.ts";
 
 loadEnv();
 let config;
@@ -18,33 +23,72 @@ try {
 }
 
 const db = serviceClient(config.supabaseUrl, config.supabaseSecretKey);
-const link = supabaseLinkStore(db);
-const hub = new OfficeHub(link, (msg) => console.log(msg));
-const machines = config.daytona
-  ? new OfficeMachines({
-      cloud: daytonaCloud(config.daytona.apiKey),
-      machines: supabaseMachineStore(db),
-      link,
-      connectedSince: (id) => hub.connectedSince(id),
-      snapshot: config.daytona.snapshot,
-      kind: config.daytona.kind,
-      appDir: config.daytona.kind === "vm" ? "~/agentfloor" : "/opt/agentfloor",
-      linkUrl: config.daytona.linkUrl,
-      claudeSecret: config.daytona.claudeSecret,
-      log: (msg) => console.log(msg),
-    })
-  : null;
-if (machines) hub.onActivity = (id) => void machines.activity(id).catch((err) => console.error(`keep-awake: ${err.message}`));
+const verify = makeVerifier(config);
+const log = (msg: string) => console.log(msg);
+const s = createServices({
+  verify,
+  log,
+  stores: {
+    offices: supabaseOfficeStore(db),
+    link: supabaseLinkStore(db),
+    setups: supabaseSetupStore(db),
+    projections: supabaseProjectionStore(db),
+    budgets: supabaseBudgetStore(db),
+    machines: supabaseMachineStore(db),
+    github: supabaseGitHubStore(db),
+  },
+  github: config.github ? { app: new GitHubApp(config.github) } : null,
+  machine: config.daytona
+    ? {
+        cloud: daytonaCloud(config.daytona.apiKey),
+        snapshot: config.daytona.snapshot,
+        kind: config.daytona.kind,
+        appDir: config.daytona.kind === "vm" ? "~/agentfloor" : "/opt/agentfloor",
+        linkUrl: config.daytona.linkUrl,
+        claudeSecret: config.daytona.claudeSecret,
+        log,
+      }
+    : null,
+});
+
 const app = await buildApp({
-  verify: makeVerifier(config),
-  offices: supabaseOfficeStore(db),
-  hub,
-  machines,
+  verify,
+  offices: s.stores.offices,
+  hub: s.hub,
+  machines: s.machines,
+  setup: s.setup,
+  budgets: s.budgets,
+  spend: s.stores.budgets,
+  watchers: s.watchers,
+  github: s.github,
+  inboxItem: async (officeId, id) => {
+    const { data } = await db.from("inbox_items").select("id, from, kind").eq("office_id", officeId).eq("id", id).maybeSingle();
+    return data;
+  },
+  audit: async (officeId, actor, action, target, detail) => {
+    if (officeId) await db.from("audit_log").insert({ office_id: officeId, actor, action, target, detail });
+  },
+  officeForRepo: async (fullName) => {
+    const { data } = await db.from("integrations").select("office_id").eq("provider", "github").eq("config->>repo", fullName).limit(1).maybeSingle();
+    return data?.office_id ?? null;
+  },
+  resolveOwnInbox: async (officeId, id) => {
+    const { error } = await db.from("inbox_items").update({ state: "resolved", resolved_at: new Date().toISOString() }).eq("office_id", officeId).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
   webOrigins: config.webOrigins,
   logger: true,
 });
 await app.listen({ port: config.port, host: config.host });
 
+// Budgets also need checking when nothing happens: a new day releases agents held yesterday.
+const budgetTimer = setInterval(() => {
+  for (const id of s.hub.connectedOffices()) void s.budgets.check(id).catch((err) => log(`budgets: ${err.message}`));
+}, 10 * 60_000);
+
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
-  process.on(sig, () => void app.close().then(() => process.exit(0)));
+  process.on(sig, () => {
+    clearInterval(budgetTimer);
+    void app.close().then(() => process.exit(0));
+  });
 }

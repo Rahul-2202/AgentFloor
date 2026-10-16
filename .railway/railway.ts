@@ -23,6 +23,11 @@ export default defineRailway((ctx) => {
       DAYTONA_API_KEY: preserve(),
       OFFICE_SNAPSHOT: preserve(),
       OFFICE_SANDBOX_KIND: "container",
+      // The GitHub App (agents' repo access); the private key is kept as set on Railway.
+      GITHUB_APP_ID: preserve(),
+      GITHUB_APP_SLUG: preserve(),
+      GITHUB_APP_PRIVATE_KEY: preserve(),
+      GITHUB_WEBHOOK_SECRET: preserve(),
     },
   });
 

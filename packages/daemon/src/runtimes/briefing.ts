@@ -1,4 +1,4 @@
-import type { AgentDef, OfficeConfig } from "../core/types.ts";
+import type { AgentDef, OfficeConfig, RepoRef } from "../core/types.ts";
 
 /**
  * What every agent is told about itself and the office, whatever its runtime.
@@ -29,7 +29,21 @@ export function memoryFile(agent: AgentDef, config: OfficeConfig): string {
   ].join("\n");
 }
 
-export function officeInstructions(agent: AgentDef): string {
+export function officeInstructions(agent: AgentDef, repo?: RepoRef | null): string {
+  return officeRules(agent) + (repo ? repoRules(agent, repo) : "");
+}
+
+function repoRules(agent: AgentDef, repo: RepoRef): string {
+  return `
+
+The code: your working folder is your own worktree of ${repo.fullName} (GitHub). Other agents have their own, so you never touch each other's files.
+- For each task, branch from the latest ${repo.defaultBranch}: git fetch origin && git checkout -b af/${agent.id}/<task-id> origin/${repo.defaultBranch}
+- Commit in small steps with clear messages. Run the project's tests before you open a PR.
+- open_pr(title, body, task_id) pushes your branch and opens the PR; it shows on your task. Never push to ${repo.defaultBranch}.
+- Nobody merges but the CEO. When a PR is ready, tell your head; heads ask the CEO with request_merge.`;
+}
+
+function officeRules(agent: AgentDef): string {
   return `You work in an office with other AI agents, as ${agent.name} (id "${agent.id}"). Talk to them only through the office tools (MCP server "office"), or the \`office\` shell command if the tools aren't available (run \`office help\`).
 
 How the office works:

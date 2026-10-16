@@ -40,11 +40,12 @@ function fakeCloud() {
   const cloud: Cloud = {
     async create(o) {
       calls.push("create");
-      const id = `vm-${vms.size + 1}`;
+      const id = `vm-${vms.size + 1}`; // reused after a delete: fine for a fake
       vms.set(id, { state: "started", env: o.env, secrets: o.secrets, daemon: null, dataDir: mkdtempSync(join(tmpdir(), "agentfloor-vm-")) });
       return { id };
     },
     async state(id) {
+      if (!vms.has(id)) throw new Error(`Sandbox with ID or name ${id} not found`);
       return vm(id).state;
     },
     async start(id) {
@@ -81,6 +82,15 @@ function fakeCloud() {
     async exec() {
       return { exitCode: 0, output: "" };
     },
+    async openTerminal(_id, o) {
+      calls.push("terminal");
+      setImmediate(() => o.onData("$ "));
+      return {
+        input: async (d) => o.onData(d),
+        resize: async () => {},
+        close: async () => void calls.push("terminal-closed"),
+      };
+    },
   };
   /** A full stop: the daemon dies with the VM. */
   async function stop(id: string) {
@@ -102,7 +112,7 @@ function memoryMachines(): MachineStore & { rows: Map<string, { sandboxId: strin
     },
     async set(id, p) {
       const r = rows.get(id) ?? { sandboxId: null, state: "none" };
-      rows.set(id, { sandboxId: p.sandboxId ?? r.sandboxId, state: p.state, error: p.error });
+      rows.set(id, { sandboxId: p.sandboxId !== undefined ? p.sandboxId : r.sandboxId, state: p.state, error: p.error });
     },
   };
 }
@@ -196,6 +206,18 @@ test("containers stop instead of pausing, and starting restarts the daemon right
   assert.ok(Date.now() - t0 < 2000, "no waiting for a daemon that can't come back");
   assert.deepEqual(s.fake.calls, ["create", "daemon", "stop", "start", "daemon"]);
   assert.ok(s.hub.isConnected(s.officeId));
+});
+
+test("a machine deleted outside AgentFloor is replaced on the next start", async (t) => {
+  const s = await setup(t);
+  await s.post("/office/start");
+  const old = s.fake.vms.get("vm-1")!;
+  await old.daemon?.close();
+  s.fake.vms.delete("vm-1");
+  const res = await s.post("/office/start");
+  assert.equal(res.json().state, "started", res.body);
+  assert.equal(s.store.rows.get(s.officeId)?.sandboxId, "vm-1", "the fake reuses the name; a new machine was created");
+  assert.equal(s.fake.calls.filter((c) => c === "create").length, 2);
 });
 
 test("after a full stop, starting brings the daemon back up", async (t) => {

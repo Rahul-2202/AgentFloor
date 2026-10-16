@@ -57,6 +57,16 @@ export interface OfficeConfig {
   rooms: RoomDef[];
   agents: AgentDef[];
   policy: Policy;
+  /** The GitHub repo agents work on (each in its own worktree and branch), once connected. */
+  repo?: RepoRef | null;
+}
+
+export interface RepoRef {
+  /** owner/name */
+  fullName: string;
+  defaultBranch: string;
+  /** Where to clone from (https://github.com/owner/name.git; a local path in tests). */
+  cloneUrl: string;
 }
 
 export type Urgency = "normal" | "urgent" | "stop";
@@ -113,6 +123,12 @@ export interface Message {
 
 export type TaskStatus = "queued" | "ongoing" | "blocked" | "review" | "done";
 
+export interface TaskOutput {
+  kind: "pr" | "file" | "link";
+  title: string;
+  url?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -123,18 +139,31 @@ export interface Task {
   status: TaskStatus;
   progress: number;
   note: string | null;
+  /** What "done" means, agreed when the work is assigned. */
+  dod?: string | null;
+  /** The step the owner is on now. */
+  step?: string | null;
+  /** What's in the way, when status is "blocked". */
+  blocker?: string | null;
+  checklist?: { text: string; done: boolean }[];
+  outputs?: TaskOutput[];
+  /** The task this one was split from (a head's plan). */
+  parentId?: string | null;
+  createdAt?: number;
   updatedAt: number;
 }
 
 export interface InboxItem {
   id: string;
-  kind: "question" | "escalation" | "budget";
+  kind: "question" | "escalation" | "budget" | "approval";
   from: string;
   threadId: string | null;
   title: string;
   body: string;
   state: "open" | "resolved";
   createdAt: number;
+  /** What approving does, for approvals (e.g. merge a PR). */
+  action?: { type: "merge"; pr: number; url: string; repo: string } | null;
 }
 
 /** The parts of an agent the CEO can change from the console. */

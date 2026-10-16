@@ -21,6 +21,14 @@ export interface Cloud {
   /** Runs a command in the background (survives this call), in a named session. */
   runInBackground(id: string, session: string, command: string): Promise<void>;
   exec(id: string, command: string): Promise<{ exitCode: number; output: string }>;
+  /** A real terminal in the machine (for "take over"). */
+  openTerminal(id: string, o: { cwd: string; cols: number; rows: number; onData: (text: string) => void; onExit: () => void }): Promise<Terminal>;
+}
+
+export interface Terminal {
+  input(data: string): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  close(): Promise<void>;
 }
 
 export function daytonaCloud(apiKey: string): Cloud {
@@ -61,6 +69,27 @@ export function daytonaCloud(apiKey: string): Cloud {
       await sandbox.process.deleteSession(session).catch(() => {});
       await sandbox.process.createSession(session);
       await sandbox.process.executeSessionCommand(session, { command, runAsync: true });
+    },
+    async openTerminal(id, o) {
+      const sandbox = await get(id);
+      const decoder = new TextDecoder();
+      const pty = await sandbox.process.createPty({
+        id: `takeover-${Date.now()}`,
+        cwd: o.cwd,
+        cols: o.cols,
+        rows: o.rows,
+        onData: (bytes) => o.onData(decoder.decode(bytes, { stream: true })),
+      } as Parameters<typeof sandbox.process.createPty>[0]);
+      await pty.waitForConnection();
+      void pty.wait().then(o.onExit, o.onExit);
+      return {
+        input: (d) => pty.sendInput(d),
+        resize: async (c, r) => void (await pty.resize(c, r)),
+        close: async () => {
+          await pty.kill().catch(() => {});
+          await pty.disconnect().catch(() => {});
+        },
+      };
     },
     async exec(id, command) {
       const res = await (await get(id)).process.executeCommand(command, undefined, undefined, 120);

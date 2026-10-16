@@ -136,6 +136,14 @@ async function main(argv: string[]): Promise<void> {
       } catch {}
       return;
     }
+    case "git-credential": {
+      // git's credential helper protocol: "get" prints a short-lived token for the office repo;
+      // "store" and "erase" are no-ops (tokens are never kept).
+      if (p.pos[0] !== "get") return;
+      const cred = await office.call<{ username: string; password: string }>("git_credential", {});
+      process.stdout.write(`username=${cred.username}\npassword=${cred.password}\n`);
+      return;
+    }
     default:
       throw new OfficeError("usage", `Unknown command "${cmd}". Run: office help`);
   }

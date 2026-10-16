@@ -1,5 +1,5 @@
 import type { Office } from "../core/office.ts";
-import { CEO, type AgentDef, type Message } from "../core/types.ts";
+import { CEO, type AgentDef, type Message, type OfficeEvent } from "../core/types.ts";
 import type { AgentRuntime } from "./types.ts";
 
 /**
@@ -18,11 +18,23 @@ export class AgentHost {
   private busy = false;
   private stopped = false;
   private readonly onQueued: (to: string, m: Message) => void;
+  private readonly onEvent: (ev: OfficeEvent) => void;
 
   constructor(office: Office, agent: AgentDef, runtime: AgentRuntime) {
     this.office = office;
     this.agent = agent;
     this.runtime = runtime;
+    // Held (budget reached, terminal taken over): stop the turn, start none until released.
+    this.onEvent = (ev) => {
+      if (ev.data.agent !== this.agent.id) return;
+      if (ev.type === "agent.held") {
+        if (this.busy) void this.runtime.interrupt();
+        else this.office.setStatus(this.agent.id, "stopped", `on hold: ${String(ev.data.reason)}`);
+      } else if (ev.type === "agent.released") {
+        this.office.setStatus(this.agent.id, "idle");
+        setImmediate(() => void this.kick());
+      }
+    };
     this.onQueued = (to, m) => {
       if (to !== this.agent.id || this.stopped) return;
       if (m.urgency === "stop" && this.busy) void this.runtime.interrupt();
@@ -34,7 +46,9 @@ export class AgentHost {
   async start(): Promise<void> {
     await this.runtime.start();
     this.office.bus.on("queued", this.onQueued);
-    this.office.setStatus(this.agent.id, "idle");
+    this.office.bus.on("event", this.onEvent);
+    const held = this.office.heldReason(this.agent.id);
+    this.office.setStatus(this.agent.id, held ? "stopped" : "idle", held ? `on hold: ${held}` : "");
     const kickoff = this.agent.options?.kickoff;
     // The kickoff turn runs in the background: starting an agent doesn't wait for its work.
     // It runs once per office, not on every restart.
@@ -67,6 +81,7 @@ export class AgentHost {
   async stop(): Promise<void> {
     this.stopped = true;
     this.office.bus.off("queued", this.onQueued);
+    this.office.bus.off("event", this.onEvent);
     await this.runtime.stop();
     this.office.setStatus(this.agent.id, "offline");
   }
@@ -77,7 +92,7 @@ export class AgentHost {
    * agent's next real turn.
    */
   async kick(): Promise<void> {
-    if (this.busy || this.stopped) return;
+    if (this.busy || this.stopped || this.office.heldReason(this.agent.id)) return;
     const due = this.office.pending(this.agent.id, "turn_end");
     if (!due.length) return;
     if (due.every(isFyi)) {
@@ -102,6 +117,8 @@ export class AgentHost {
       this.office.setActivity(this.agent.id, null);
     }
     if (this.stopped) return;
+    const held = this.office.heldReason(this.agent.id);
+    if (held) return this.office.setStatus(this.agent.id, "stopped", `on hold: ${held}`);
     this.office.setStatus(this.agent.id, halted ? "stopped" : "idle");
     if (this.next) await this.applySwap();
     else await this.kick();
