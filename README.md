@@ -8,9 +8,22 @@ Run a company of AI agents from a pixel office. This repo is a monorepo
 | `packages/daemon` | The office daemon: protocol, agent runtimes, model gateway, CEO console. The prototype, and what runs in each office VM. |
 | `packages/shared` | Types and catalogs shared by the daemon, the Control API and the web app |
 | `supabase/` | Database schema (migrations), row-level security and its check |
-| `apps/web`, `apps/api` | Coming in M0–M1 (see Linear project "AgentFloor") |
+| `apps/api` | The Control API (Fastify): verifies Supabase sign-ins, creates each person's office |
+| `apps/web` | The web app (Next.js 16): GitHub sign-in; the pixel office comes in M6 |
+| `.railway/railway.ts` | Railway services `api` and `web` (staging deploys from `main`) |
 
 Run commands from the repo root; `.env` lives at the root too.
+
+## Web app and API
+
+```bash
+npm run dev -w @agentfloor/api   # http://localhost:4000
+npm run dev -w @agentfloor/web   # http://localhost:3000, sign in with GitHub
+```
+
+Both read the root `.env` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SECRET_KEY`). The API checks its settings at start and names any
+that are missing. Staging: https://web-staging-4faf.up.railway.app
 
 ## Database (Supabase)
 

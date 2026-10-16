@@ -7,3 +7,6 @@ data-live/
 data-midtask/
 data-mixed/
 data-check/
+.next/
+next-env.d.ts
+*.tsbuildinfo

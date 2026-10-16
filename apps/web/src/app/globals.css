@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1efea;
+  --ink: #0a0a0a;
+  --ink-2: #3a3a38;
+  --muted: #6a6a66;
+  --faint: #9a9893;
+  --line: rgba(10, 10, 10, 0.08);
+  --line-2: rgba(10, 10, 10, 0.14);
+  --accent: #e8743b;
+  --accent-soft: #fbe9de;
+  --green: #3f9b5f;
+  --amber: #d99a2b;
+  --red: #d9534a;
+  --violet: #7b6cd9;
+  --blue: #3b7be8;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--green);
+  --color-warn: var(--amber);
+  --color-bad: var(--red);
+  --color-violet: var(--violet);
+  --color-blue: var(--blue);
+  --font-display: var(--font-figtree), "Satoshi", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Satoshi", var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --shadow-card: 0 1px 2px rgba(10, 10, 10, 0.04), 0 8px 24px -8px rgba(10, 10, 10, 0.1);
+  --shadow-float: 0 2px 4px rgba(10, 10, 10, 0.04), 0 24px 60px -16px rgba(10, 10, 10, 0.22);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
