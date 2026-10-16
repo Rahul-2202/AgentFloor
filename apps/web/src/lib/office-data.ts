@@ -170,10 +170,11 @@ const REALTIME: Record<string, keyof typeof TABLES> = {
  * The office's rows (read under row-level security), kept current with
  * Supabase Realtime. The browser only reads; actions go to the Control API.
  */
-export function useOfficeData(officeId: string): OfficeData {
+export function useOfficeData(officeId: string, enabled = true): OfficeData {
   const [data, setData] = useState<OfficeData>(EMPTY);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const load = async (key: keyof typeof TABLES) => {
@@ -197,7 +198,7 @@ export function useOfficeData(officeId: string): OfficeData {
       for (const t of timers.values()) clearTimeout(t);
       void supabase.removeChannel(channel);
     };
-  }, [officeId]);
+  }, [officeId, enabled]);
 
   return data;
 }

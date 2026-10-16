@@ -44,7 +44,7 @@ How you talk: plain, warm, brief. Lead with the answer. Use the names of rooms a
 
 const ONBOARDING = `This office is new: run the onboarding interview, one step at a time, and keep each message short.
 1. Ask about the company: what it does, who it's for, its goals for the next months, and any rules that must never break.
-2. Propose rooms and agents for those goals (a head per room; 2 to 4 agents a room; at most 6 rooms). Say what each does. Adjust as the CEO answers.
+2. Propose rooms and agents for those goals (a head per room; 2 to 4 agents a room, never more than 6; at most 5 rooms). Say what each does. Adjust as the CEO answers.
 3. Ask for each room: when an agent is blocked, should it park the task and switch, make its best guess and flag it, or stop and wait? Should PRs open as drafts (the default) or ready for review?
 4. Ask for a daily budget (API-equivalent dollars): a warning level and a hard stop.
 5. Suggest connecting a GitHub repo in Setup → GitHub (you can't do it for them), so agents can work on code.

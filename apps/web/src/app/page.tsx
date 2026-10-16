@@ -2,14 +2,14 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
-import { ensureOffice, pauseOffice, startOffice, type Office } from "@/lib/api";
+import { ensureOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
-import { Console } from "./office/Console";
+import { OfficeApp } from "@/office-app/OfficeApp";
 
 type State =
   | { kind: "loading" }
   | { kind: "signed-out"; error?: string }
-  | { kind: "office"; session: Session; office: Office; created: boolean }
+  | { kind: "office"; session: Session; office: Office }
   | { kind: "error"; session: Session; error: string };
 
 export default function Home() {
@@ -20,8 +20,8 @@ export default function Home() {
     async function load(session: Session | null) {
       if (!session) return setState({ kind: "signed-out" });
       try {
-        const { office, created } = await ensureOffice();
-        if (!cancelled) setState({ kind: "office", session, office, created });
+        const { office } = await ensureOffice();
+        if (!cancelled) setState({ kind: "office", session, office });
       } catch (err) {
         // The sign-in this browser holds is for an account that's gone (or expired): start over.
         if ((err as { status?: number }).status === 401) {
@@ -47,27 +47,7 @@ export default function Home() {
   const signIn = () =>
     supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: window.location.origin } });
 
-  if (state.kind === "office") {
-    return (
-      <main className="mx-auto min-h-dvh max-w-5xl px-4 py-6">
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="font-display text-2xl font-semibold">{state.office.name}</h1>
-            <p className="text-sm text-muted">
-              {state.created ? "Your office is ready." : "AgentFloor"} · signed in as {state.session.user.user_metadata.user_name ?? state.session.user.email}
-            </p>
-          </div>
-          <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
-            Sign out
-          </button>
-        </header>
-        <div className="mt-4">
-          <Machine office={state.office} />
-        </div>
-        <Console officeId={state.office.id} running onboarded={!!state.office.onboardedAt} />
-      </main>
-    );
-  }
+  if (state.kind === "office") return <OfficeApp key={state.office.id} office={state.office} />;
 
   return (
     <main className="min-h-dvh grid place-items-center px-4">
@@ -99,59 +79,5 @@ export default function Home() {
         )}
       </div>
     </main>
-  );
-}
-
-const LABELS: Record<string, string> = {
-  none: "not created yet",
-  creating: "setting up (first time takes a minute)",
-  starting: "starting",
-  started: "running",
-  pausing: "pausing",
-  paused: "paused",
-  stopped: "asleep",
-  archived: "asleep",
-  error: "needs attention",
-};
-
-/** The office computer: its state, and starting or pausing it. */
-function Machine({ office }: { office: Office }) {
-  const [state, setState] = useState(office.sandboxState);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (action: () => Promise<{ state: string }>, during: string) => {
-    setBusy(true);
-    setError(null);
-    setState(during);
-    try {
-      setState((await action()).state);
-    } catch (err) {
-      setState("error");
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const running = state === "started";
-  return (
-    <div className="rounded-xl bg-surface-2 p-4 text-sm">
-      <div className="flex items-center justify-between gap-3">
-        <span>
-          <span className="text-muted">Office computer: </span>
-          <span className={running ? "text-ok" : state === "error" ? "text-bad" : ""}>{LABELS[state] ?? state}</span>
-        </span>
-        {running ? (
-          <button disabled={busy} onClick={() => run(pauseOffice, "stopped")} className="rounded-lg px-3 py-1.5 text-muted ring-1 ring-line-2 disabled:opacity-50">
-            Stop
-          </button>
-        ) : (
-          <button disabled={busy} onClick={() => run(startOffice, state === "none" ? "creating" : "starting")} className="rounded-lg bg-ink px-3 py-1.5 font-medium text-white disabled:opacity-50">
-            Start office
-          </button>
-        )}
-      </div>
-      {error && <p className="mt-2 text-bad">{error}</p>}
-      <p className="mt-2 text-faint">It goes to sleep after 15 quiet minutes. Starting it again takes a few seconds, and agents pick up their conversations.</p>
-    </div>
   );
 }
