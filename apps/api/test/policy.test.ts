@@ -160,3 +160,22 @@ test("a new office starts empty, and onboarding builds it", async () => {
   // Budgets can be set before there are any rooms.
   assert.ok(propose(empty, [{ op: "set_budget", scope: "office", id: "", dailyUsdSoft: 2, dailyUsdHard: 6 }]));
 });
+
+test("the floor seats five rooms and six agents a room", async () => {
+  const { emptySetup } = await import("@agentfloor/shared/setup");
+  const fails = (setup: ReturnType<typeof emptySetup>, op: object) => {
+    try {
+      propose(setup, [op as never]);
+    } catch (err) {
+      return (err as PolicyError).problems.join(" ");
+    }
+    return "";
+  };
+  let s = emptySetup("Acme");
+  for (let n = 1; n <= 5; n++) s = propose(s, [{ op: "add_room", name: `Room ${n}`, head: { name: `Head ${n}`, title: "Head" } }]).next;
+  assert.deepEqual(s.rooms.map((r) => r.slot), [1, 2, 3, 4, 5]);
+  assert.match(fails(s, { op: "add_room", name: "Room 6", head: { name: "Head 6", title: "Head" } }), /at most 5 rooms/);
+  const room = s.rooms[0].id;
+  for (let n = 1; n <= 5; n++) s = propose(s, [{ op: "hire_agent", room, name: `Member ${n}`, title: "Dev" }]).next;
+  assert.match(fails(s, { op: "hire_agent", room, name: "One too many", title: "Dev" }), /seats at most 6/);
+});

@@ -23,7 +23,10 @@ import type { AgentDef, Policy } from "@agentfloor/shared/types";
 
 /** Runtimes offices can use in v1 (the others need Daytona network access we don't have). */
 export const V1_RUNTIMES = ["claude-code"];
-export const MAX_ROOMS = 6;
+/** The floor plan has five team rooms (plus your office and the meeting room). */
+export const MAX_ROOMS = 5;
+/** The most agents a room's desks seat, head included. */
+export const MAX_ROOM_AGENTS = 6;
 
 type AgentFields = { name?: string; title?: string; runtime?: string; model?: string; effort?: string };
 
@@ -126,7 +129,7 @@ function applyOp(s: OfficeSetup, op: SetupOp): void {
       if (s.rooms.some((r) => r.id === id)) throw new Error(`There's already a room "${id}".`);
       const headId = op.head.id ?? uniqueId(op.head.name, s.agents.map((a) => a.id));
       const used = new Set(s.rooms.map((r) => r.slot));
-      const slot = [1, 2, 3, 4, 5, 6].find((n) => !used.has(n));
+      const slot = [1, 2, 3, 4, 5].find((n) => !used.has(n));
       s.rooms.push(clean({ id, name: need(op.name, "A room needs a name."), head: headId, purpose: op.purpose, responsibilities: op.responsibilities, dod: op.dod, slot }));
       s.agents.push(newAgent(headId, op.head, id, "head"));
       return;
@@ -157,6 +160,7 @@ function applyOp(s: OfficeSetup, op: SetupOp): void {
 
     case "hire_agent": {
       const room = findRoom(s, op.room);
+      if (s.agents.filter((a) => a.room === room.id).length >= MAX_ROOM_AGENTS) throw new Error(`${room.name} is full: a room seats at most ${MAX_ROOM_AGENTS} agents.`);
       const id = op.id ?? uniqueId(op.name, s.agents.map((a) => a.id));
       if (s.agents.some((a) => a.id === id)) throw new Error(`There's already an agent "${id}".`);
       s.agents.push(newAgent(id, op, room.id, "member"));
@@ -169,6 +173,7 @@ function applyOp(s: OfficeSetup, op: SetupOp): void {
       if (op.title !== undefined) a.title = op.title;
       if (op.room && op.room !== a.room) {
         const to = findRoom(s, op.room);
+        if (s.agents.filter((x) => x.room === to.id).length >= MAX_ROOM_AGENTS) throw new Error(`${to.name} is full: a room seats at most ${MAX_ROOM_AGENTS} agents.`);
         if (a.role === "head") throw new Error(`${a.name} heads ${findRoom(s, a.room).name}; give the room a new head before moving them.`);
         a.room = to.id;
       }
@@ -229,6 +234,9 @@ function applyOp(s: OfficeSetup, op: SetupOp): void {
       const n = structuredClone(op.setup);
       if (n.rooms.length > MAX_ROOMS) throw new Error(`An office has at most ${MAX_ROOMS} rooms in v1.`);
       n.rooms.forEach((r, i) => (r.slot ??= i + 1));
+      for (const r of n.rooms) {
+        if (n.agents.filter((a) => a.room === r.id).length > MAX_ROOM_AGENTS) throw new Error(`${r.name} has too many agents: a room seats at most ${MAX_ROOM_AGENTS}.`);
+      }
       for (const a of n.agents) {
         a.runtime ||= "claude-code";
         a.title ??= "";

@@ -12,6 +12,8 @@ export interface Cloud {
     kind: "vm" | "container";
     idleMinutes: number;
   }): Promise<{ id: string }>;
+  /** Makes sure a snapshot can be used (Daytona deactivates ones unused for a while). */
+  ensureSnapshot?(name: string): Promise<void>;
   state(id: string): Promise<string>;
   start(id: string): Promise<void>;
   pause(id: string): Promise<void>;
@@ -50,6 +52,24 @@ export function daytonaCloud(apiKey: string): Cloud {
         { timeout: 300 },
       );
       return { id: sandbox.id };
+    },
+    async ensureSnapshot(name) {
+      // Unused snapshots go inactive; the first office start after that wakes it (a minute or two).
+      const deadline = Date.now() + 10 * 60_000;
+      while (Date.now() < deadline) {
+        const snap = await daytona.snapshot.get(name);
+        if (snap.state === "active") return;
+        if (snap.state === "inactive") {
+          await daytona.snapshot.activate(snap).catch((err: Error) => {
+            // "Deactivation still in progress": try again shortly.
+            if (!/in progress/i.test(err.message)) throw err;
+          });
+        } else if (snap.state === "error" || snap.state === "build_failed") {
+          throw new Error(`The office image isn't usable (${snap.state}). It needs rebuilding.`);
+        }
+        await new Promise((r) => setTimeout(r, 10_000));
+      }
+      throw new Error("The office image is taking too long to wake up. Try starting again in a few minutes.");
     },
     async state(id) {
       return (await get(id)).state ?? "unknown";

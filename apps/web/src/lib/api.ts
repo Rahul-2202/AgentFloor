@@ -162,7 +162,7 @@ export const confirmAdaCard = (id: string) => post<{ version: number }>(`/office
 export const dismissAdaCard = (id: string) => post<unknown>(`/office/ada/cards/${id}/dismiss`, {});
 export const adaBriefing = () => post<{ briefing: string }>("/office/ada/briefing", {});
 
-export const scheduleMeeting = (m: { title: string; attendees: string[]; agenda: string[]; chair?: "ada" | "ceo" }) => post<unknown>("/office/meetings", m);
+export const scheduleMeeting = (m: { title: string; attendees: string[]; agenda: string[]; chair?: "ada" | "ceo" }) => post<{ meeting: { id: string } }>("/office/meetings", m);
 export const startMeeting = (id: string) => post<unknown>(`/office/meetings/${id}/start`, {});
 export const endMeeting = (id: string) => post<unknown>(`/office/meetings/${id}/end`, {});
 export const meetingMinutes = (id: string) =>

@@ -134,6 +134,7 @@ export class OfficeMachines {
       if (!m.sandboxId) {
         await this.o.machines.set(officeId, { state: "creating" });
         // A fresh token per VM; only its hash is kept.
+        await this.o.cloud.ensureSnapshot?.(this.o.snapshot);
         const { token, hash } = newOfficeToken(officeId);
         await this.o.link.setTokenHash(officeId, hash);
         const { id } = await this.o.cloud.create({
