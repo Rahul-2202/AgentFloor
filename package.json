@@ -1,25 +1,18 @@
 {
   "name": "agentfloor",
   "version": "0.1.0",
-  "description": "AgentFloor prototype: office daemon and agent-to-agent protocol",
-  "scripts": {
-    "daemon": "node --disable-warning=ExperimentalWarning src/daemon/main.ts",
-    "office": "node --disable-warning=ExperimentalWarning src/cli/office.ts",
-    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
-  },
+  "private": true,
+  "description": "AgentFloor: run a company of AI agents from a pixel office",
   "type": "module",
-  "dependencies": {
-    "@daytona/sdk": "^0.224.1",
-    "@modelcontextprotocol/sdk": "^1.32.1",
-    "zod": "^4.6.7"
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "daemon": "npm run daemon -w @agentfloor/daemon --",
+    "sandbox": "npm run sandbox -w @agentfloor/daemon --"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
-  },
-  "private": true,
-  "bin": {
-    "office": "bin/office"
   }
 }

@@ -1,10 +1,10 @@
-import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { CEO } from "../core/types.ts";
 import { loadConfig } from "../core/config.ts";
 import { startDaemon } from "./daemon.ts";
+import { loadEnv } from "../env.ts";
 
-if (existsSync(".env")) process.loadEnvFile(".env");
+loadEnv();
 
 const { values } = parseArgs({
   options: {
