@@ -14,6 +14,7 @@ import {
   githubStatus,
   mergePr,
   officeCall,
+  releaseAgent,
   requestChanges,
   resolveInbox,
   setupVersions,
@@ -149,6 +150,11 @@ function AgentPanel({
   const [keys, setKeys] = useState("");
   const lines = live.lines[id] ?? [];
   const takenOver = live.terminal?.agent === id;
+  // The live stream only has what happened since the page loaded; the office keeps the recent past.
+  useEffect(() => {
+    officeCall<{ at: number; kind: string; text: string }[]>("agent_output", { agent: id }).then((earlier) => live.seed(id, earlier), () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   if (!a) return null;
 
   const send = async () => {
@@ -170,6 +176,19 @@ function AgentPanel({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {a.held_reason && !takenOver && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-lg bg-accent-soft px-3 py-2 text-sm">
+            <span>
+              {a.name} is on hold: {a.held_reason}.
+            </span>
+            <button
+              onClick={() => releaseAgent(id).then(() => onDone(`${a.name} carries on.`), (e) => onDone(e.message))}
+              className="shrink-0 rounded-lg bg-ink px-3 py-1 font-medium text-white"
+            >
+              {a.held_reason.includes("took over") ? "Hand back" : "Let them carry on"}
+            </button>
+          </div>
+        )}
         <h3 className="text-sm font-medium">Live session</h3>
         <pre className="mt-2 h-56 overflow-y-auto whitespace-pre-wrap rounded-lg bg-ink p-3 font-mono text-xs text-white/85">
           {lines.length ? lines.map((l) => `${l.kind === "tool" ? "› " : l.kind === "error" ? "! " : ""}${l.text}`).join("\n") : "Nothing yet. Lines appear here while the agent works."}
@@ -197,7 +216,7 @@ function AgentPanel({
           </div>
         ) : (
           <button onClick={() => live.takeOver(id)} className="mt-3 text-sm text-accent">
-            Take over the terminal
+            Take over its terminal (pauses {a.name} until you hand back)
           </button>
         )}
 

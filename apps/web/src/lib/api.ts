@@ -107,3 +107,6 @@ export const chooseRepo = (repo: string) => post<unknown>("/office/github/repo",
 export const getPr = (n: number) => api<{ pr: PullRequestView }>(`/office/prs/${n}`);
 export const mergePr = (n: number, inboxId?: string) => post<{ sha: string }>(`/office/prs/${n}/merge`, { inboxId });
 export const requestChanges = (n: number, comment: string, inboxId?: string) => post<unknown>(`/office/prs/${n}/changes`, { comment, inboxId });
+
+/** Lets a parked agent carry on. */
+export const releaseAgent = (id: string) => post<unknown>(`/office/agents/${encodeURIComponent(id)}/release`, {});

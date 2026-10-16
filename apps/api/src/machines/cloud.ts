@@ -73,9 +73,11 @@ export function daytonaCloud(apiKey: string): Cloud {
     async openTerminal(id, o) {
       const sandbox = await get(id);
       const decoder = new TextDecoder();
+      // Daytona wants an absolute folder: "~" means the machine user's home.
+      const home = (await sandbox.getUserHomeDir()) ?? "/root";
       const pty = await sandbox.process.createPty({
         id: `takeover-${Date.now()}`,
-        cwd: o.cwd,
+        cwd: o.cwd.replace(/^~(?=\/|$)/, home),
         cols: o.cols,
         rows: o.rows,
         onData: (bytes) => o.onData(decoder.decode(bytes, { stream: true })),
