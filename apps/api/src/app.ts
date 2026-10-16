@@ -190,6 +190,18 @@ export async function buildApp(deps: Deps) {
       return { since: since.toISOString(), total: sum(rows), rooms, agents: rows };
     });
 
+    /** Lets a parked agent carry on (a take-over that never handed back, or a hold the CEO lifts). */
+    authed.post<{ Params: { id: string } }>("/office/agents/:id/release", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      try {
+        return { result: await deps.hub.call(id, "ceo_release_agent", { agent: req.params.id }) };
+      } catch (err) {
+        if (err instanceof LinkError) return reply.code(err.code === "office_offline" ? 503 : 400).send({ error: err.message });
+        throw err;
+      }
+    });
+
     /** Marks an inbox item done (the daemon's, or one the API raised). */
     authed.post<{ Params: { id: string } }>("/office/inbox/:id/resolve", async (req, reply) => {
       const id = await officeOf(req);

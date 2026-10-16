@@ -64,6 +64,13 @@ export function useLive(enabled: boolean) {
   const send = useCallback((msg: object) => ws.current?.readyState === WebSocket.OPEN && ws.current.send(JSON.stringify(msg)), []);
   return {
     lines,
+    /** Fills in an agent's recent lines (from the office's buffer) after a page load. */
+    seed: (agent: string, earlier: OutputLine[]) =>
+      setLines((all) => {
+        const now = all[agent] ?? [];
+        const firstLive = now[0]?.at ?? Infinity;
+        return { ...all, [agent]: [...earlier.filter((l) => l.at < firstLive), ...now].slice(-400) };
+      }),
     activity,
     terminal,
     error,

@@ -97,14 +97,23 @@ export class Watchers {
           await handback("switched agent");
           // Park the agent first, so it doesn't type over the CEO.
           await this.deps.hub.call(officeId!, "ceo_hold_agent", { agent: msg.agent, reason: TAKEOVER_HOLD });
-          const t = await m.cloud.openTerminal(sandboxId, {
-            cwd: `~/office-data/agents/${msg.agent}/work`,
-            cols: msg.cols ?? 100,
-            rows: msg.rows ?? 30,
-            onData: (data) => send(ws, { t: "terminal", data }),
-            onExit: () => void handback("the terminal exited"),
-          });
+          let t: Terminal;
+          try {
+            t = await m.cloud.openTerminal(sandboxId, {
+              cwd: `~/office-data/agents/${msg.agent}`,
+              cols: msg.cols ?? 100,
+              rows: msg.rows ?? 30,
+              onData: (data) => send(ws, { t: "terminal", data }),
+              onExit: () => void handback("the terminal exited"),
+            });
+          } catch (err) {
+            // No terminal, no take-over: the agent carries on.
+            await this.deps.hub.call(officeId!, "ceo_release_agent", { agent: msg.agent }).catch(() => {});
+            throw new Error(`Couldn't open a terminal: ${(err as Error).message}`);
+          }
           terminal = { agent: msg.agent, t };
+          // Into the agent's working folder: its repo worktree if there is one.
+          await t.input("cd repo 2>/dev/null || cd work; clear\n").catch(() => {});
           return;
         }
         if (msg.t === "input") return void terminal?.t.input(msg.data);

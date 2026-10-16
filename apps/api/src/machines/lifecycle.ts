@@ -179,7 +179,10 @@ export class OfficeMachines {
       sandboxId,
       DAEMON_SESSION,
       // On VMs, Node and Claude Code live in ~/.local/bin (see infra/build-office-snapshot.ts).
-      `export PATH="$HOME/.local/bin:$PATH"; mkdir -p ${DATA} && cd ${this.o.appDir ?? "/opt/agentfloor"} && npm run daemon -w @agentfloor/daemon -- --data ${DATA} >> ${DATA}/daemon.log 2>&1`,
+      // NODE_USE_ENV_PROXY: the daemon's own requests (the model gateway) must go through Daytona's
+      // outbound proxy like everything else, or the Claude secret's placeholder reaches Anthropic
+      // unreplaced (401). Node's fetch ignores HTTPS_PROXY without it.
+      `export PATH="$HOME/.local/bin:$PATH" NODE_USE_ENV_PROXY=1; mkdir -p ${DATA} && cd ${this.o.appDir ?? "/opt/agentfloor"} && npm run daemon -w @agentfloor/daemon -- --data ${DATA} >> ${DATA}/daemon.log 2>&1`,
     );
   }
 
