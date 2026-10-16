@@ -37,7 +37,8 @@ export class AgentHost {
     this.office.setStatus(this.agent.id, "idle");
     const kickoff = this.agent.options?.kickoff;
     // The kickoff turn runs in the background: starting an agent doesn't wait for its work.
-    if (typeof kickoff === "string") void this.runTurn(kickoff, "starting", false);
+    // It runs once per office, not on every restart.
+    if (typeof kickoff === "string" && this.office.firstTime(`kickoff:${this.agent.id}`)) void this.runTurn(kickoff, "starting", false);
     else void this.kick();
   }
 

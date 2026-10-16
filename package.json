@@ -10,6 +10,7 @@
   },
   "type": "module",
   "dependencies": {
+    "@daytona/sdk": "^0.224.1",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^4.6.7"
   },

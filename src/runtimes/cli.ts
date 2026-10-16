@@ -40,7 +40,11 @@ class CliRuntime implements AgentRuntime {
   private readonly ctx: AgentContext;
   private readonly sessionFile: string;
   private child: ChildProcess | null = null;
+  /** Resolves when the current CLI process has exited. */
+  private exited: Promise<void> = Promise.resolve();
   private interrupted = false;
+  /** Set once stopped: late output from a dying process is ignored. */
+  private closed = false;
   /** Error text seen during the current turn, to tell a bad session from a passing failure. */
   private errors = "";
   private readonly parse: (line: string) => CliEvent | null;
@@ -101,6 +105,7 @@ class CliRuntime implements AgentRuntime {
     return new Promise((resolve) => {
       const child = spawn(cmd, args, { cwd: this.ctx.workdir, env: { ...this.ctx.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
       this.child = child;
+      this.exited = new Promise((done) => child.once("close", () => done()));
       const timer = setTimeout(() => {
         this.ctx.output("error", "Turn timed out; stopping it.");
         child.kill("SIGKILL");
@@ -111,7 +116,7 @@ class CliRuntime implements AgentRuntime {
 
       createInterface({ input: child.stdout! }).on("line", (line) => this.onLine(line));
       createInterface({ input: child.stderr! }).on("line", (line) => {
-        if (!line.trim()) return;
+        if (!line.trim() || this.closed) return;
         this.errors += line + "\n";
         this.ctx.output("info", line);
       });
@@ -121,6 +126,7 @@ class CliRuntime implements AgentRuntime {
       child.on("close", (code, signal) => {
         clearTimeout(timer);
         this.child = null;
+        if (this.closed) return resolve(false);
         if (code !== 0) this.ctx.output(this.interrupted ? "info" : "error", `${cmd} exited with ${signal ?? `code ${code}`}`);
         this.ctx.usage({ turns: 1 });
         resolve(code === 0);
@@ -129,7 +135,7 @@ class CliRuntime implements AgentRuntime {
   }
 
   private onLine(line: string): void {
-    if (!line.trim()) return;
+    if (!line.trim() || this.closed) return;
     let ev: CliEvent | null;
     try {
       ev = this.parse(line);
@@ -159,8 +165,11 @@ class CliRuntime implements AgentRuntime {
     }, 3000);
   }
 
+  /** Stops the CLI and waits for it to exit (up to 5 s), so nothing arrives after the office closes. */
   async stop(): Promise<void> {
     await this.interrupt();
+    await Promise.race([this.exited, new Promise((r) => setTimeout(r, 5000))]);
+    this.closed = true;
   }
 }
 

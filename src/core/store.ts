@@ -22,6 +22,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS messages_thread ON messages (thread_id);
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS inbox (id TEXT PRIMARY KEY, state TEXT NOT NULL, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS usage (agent TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS agent_settings (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS versions (v INTEGER PRIMARY KEY AUTOINCREMENT, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, type TEXT NOT NULL, json TEXT NOT NULL);
@@ -115,6 +116,17 @@ export class Store {
     return (this.db.prepare("SELECT json FROM inbox ORDER BY rowid").all() as { json: string }[]).map(
       (r) => JSON.parse(r.json) as InboxItem,
     );
+  }
+
+  /* ------------------------------------------------------------------ usage */
+
+  putUsage(agent: string, usage: object): void {
+    this.db.prepare("INSERT OR REPLACE INTO usage (agent, json) VALUES (?, ?)").run(agent, JSON.stringify(usage));
+  }
+
+  usage(): Record<string, any> {
+    const rows = this.db.prepare("SELECT agent, json FROM usage").all() as { agent: string; json: string }[];
+    return Object.fromEntries(rows.map((r) => [r.agent, JSON.parse(r.json)]));
   }
 
   /* --------------------------------------------------- settings, versions */

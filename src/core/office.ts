@@ -68,6 +68,7 @@ export class Office {
     this.now = opts.now ?? Date.now;
     this.agents = new Map(config.agents.map((a) => [a.id, a]));
     this.bus.setMaxListeners(0);
+    for (const [id, u] of Object.entries(store.usage())) this.usage.set(id, u as Usage);
     // Settings the CEO changed in the console win over the config file.
     for (const [id, saved] of Object.entries(store.agentSettings())) {
       const a = this.agents.get(id);
@@ -698,6 +699,11 @@ export class Office {
     return { applied: true, changes, after, version: version.v };
   }
 
+  /** True the first time it's called for a key, ever (it's stored): e.g. an agent's kickoff. */
+  firstTime(key: string): boolean {
+    return this.store.nextId(`once:${key}`) === `once:${key}-1`;
+  }
+
   /* --------------------------------------------------------------- status */
 
   private readonly statuses = new Map<string, { status: AgentStatus; detail: string; at: number }>();
@@ -738,6 +744,7 @@ export class Office {
     cur.calls += u.calls ?? 0;
     cur.turns += u.turns ?? 0;
     this.usage.set(agent, cur);
+    this.store.putUsage(agent, cur);
     this.emit("agent.usage", { agent, usage: cur });
   }
 

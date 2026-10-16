@@ -1,0 +1,29 @@
+{
+  "name": "AgentFloor HQ (Claude check)",
+  "policy": { "askDeadlineSec": 600 },
+  "rooms": [{ "id": "dev", "name": "Development", "head": "pm" }],
+  "agents": [
+    { "id": "pm", "name": "PM", "room": "dev", "role": "head", "title": "Runs the Development room" },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API",
+      "options": {
+        "kickoff": "Start a huddle with Frontend about the booking confirmation response (what POST /bookings returns). Propose a first shape, settle it with Frontend in a few exchanges, then end the huddle with the agreed shape written out exactly. Don't write code."
+      },
+      "lessons": ["Bookings have id, start, end (UTC ISO), tz (IANA) and practitionerId."]
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "lessons": [
+        "The confirmation screen shows the clinic's name and address, and a cancel link, so it needs all three from the API without a second call."
+      ]
+    }
+  ]
+}
