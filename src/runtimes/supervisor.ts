@@ -1,5 +1,5 @@
 import type { Office } from "../core/office.ts";
-import type { AgentDef, Message } from "../core/types.ts";
+import { CEO, type AgentDef, type Message } from "../core/types.ts";
 import type { AgentRuntime } from "./types.ts";
 
 /**
@@ -70,11 +70,20 @@ export class AgentHost {
     this.office.setStatus(this.agent.id, "offline");
   }
 
-  /** Starts a turn with whatever is due, if the agent is free. */
+  /**
+   * Starts a turn with whatever is due, if the agent is free. FYIs alone don't
+   * start one: a turn costs a full model call, so they wait and arrive with the
+   * agent's next real turn.
+   */
   async kick(): Promise<void> {
     if (this.busy || this.stopped) return;
+    const due = this.office.pending(this.agent.id, "turn_end");
+    if (!due.length) return;
+    if (due.every(isFyi)) {
+      this.office.setStatus(this.agent.id, "idle", `${due.length} FYI${due.length > 1 ? "s" : ""} waiting for its next turn`);
+      return;
+    }
     const msgs = this.office.take(this.agent.id, "turn_end");
-    if (!msgs.length) return;
     await this.runTurn(this.office.render(msgs), describe(msgs), msgs.some((m) => m.urgency === "stop"), msgs.map((m) => m.threadId));
   }
 
@@ -96,6 +105,11 @@ export class AgentHost {
     if (this.next) await this.applySwap();
     else await this.kick();
   }
+}
+
+/** Something to read, not act on: an agent's or the office's normal-urgency inform. The CEO's messages always wake an agent. */
+export function isFyi(m: Message): boolean {
+  return m.type === "inform" && m.urgency === "normal" && m.from !== CEO;
 }
 
 function describe(msgs: Message[]): string {

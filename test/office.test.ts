@@ -294,3 +294,39 @@ test("changing an agent's runtime: read-back first, then apply, versioned and ke
   assert.equal(again.agent("frontend").runtime, "junie");
   assert.equal(again.agent("pm").model, "haiku");
 });
+
+test("FYIs don't wake an idle agent; they arrive with its next real turn", async () => {
+  const { office } = makeOffice();
+  const { AgentHost } = await import("../src/runtimes/supervisor.ts");
+  const turns: string[] = [];
+  const host = new AgentHost(office, office.agent("pm"), {
+    capabilities: { structuredOutput: true, resume: true, mcp: true, toolHooks: true, interrupt: true, memoryFile: "x" },
+    async start() {},
+    async turn(input) {
+      turns.push(input);
+    },
+    async interrupt() {},
+    async stop() {},
+  });
+  await host.start();
+  const settle = () => new Promise((r) => setTimeout(r, 20));
+
+  office.inform("backend", { to: "pm", text: "Slots API will return UTC." });
+  office.ceoMessage({ to: "frontend", text: "Prioritise the calendar." }); // copies PM: an office FYI
+  await settle();
+  assert.equal(turns.length, 0, "FYIs alone don't start a turn");
+  assert.equal(office.pending("pm", "turn_end").length, 2);
+
+  office.ask("frontend", { to: "pm", question: "Is the launch still Friday?" });
+  await settle();
+  assert.equal(turns.length, 1, "a question wakes it");
+  assert.match(turns[0]!, /Slots API will return UTC/);
+  assert.match(turns[0]!, /Is the launch still Friday/);
+  assert.equal(office.pending("pm", "turn_end").length, 0);
+
+  office.ceoMessage({ to: "pm", text: "Ship it." });
+  office.inform("backend", { to: "pm", text: "Tests are green.", urgency: "urgent" });
+  await settle();
+  assert.equal(turns.length, 2, "the CEO's messages and urgent informs wake it");
+  await host.stop();
+});
