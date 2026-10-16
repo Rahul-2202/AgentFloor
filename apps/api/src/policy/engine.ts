@@ -309,7 +309,6 @@ function setRuntime(a: AgentDef, f: AgentFields): void {
 
 function validate(s: OfficeSetup): string[] {
   const problems: string[] = [];
-  if (!s.rooms.length) problems.push("An office needs at least one room.");
   for (const r of s.rooms) {
     const head = s.agents.find((a) => a.id === r.head);
     if (!head || head.room !== r.id || head.role !== "head") problems.push(`${r.name} needs a head who works in it.`);

@@ -1,5 +1,5 @@
 import type { LockTarget } from "@agentfloor/shared/governance";
-import { defaultSetup, DEFAULT_POLICY, type Budget, type OfficeSetup, type RoomSetup } from "@agentfloor/shared/setup";
+import { defaultSetup, DEFAULT_POLICY, emptySetup, type Budget, type OfficeSetup, type RoomSetup } from "@agentfloor/shared/setup";
 import type { AgentDef } from "@agentfloor/shared/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Change } from "../policy/engine.ts";
@@ -39,8 +39,9 @@ export function supabaseSetupStore(db: SupabaseClient): SetupStore {
     async load(officeId) {
       const office = check(await db.from("offices").select("name, config_version, config_pushed").eq("id", officeId).single(), "reading office");
       if (office.config_version === 0) {
-        const seed = defaultSetup(office.name);
-        await store.apply(officeId, 0, seed, "system", "Starting setup", ["The office opens with its starting rooms and agents."], []);
+        // A new office starts empty: Ada's onboarding builds it with the CEO.
+        const seed = emptySetup(office.name);
+        await store.apply(officeId, 0, seed, "system", "A new, empty office", ["The office opens empty; Ada sets it up with you."], []);
         return { setup: seed, version: 1, pushed: office.config_pushed };
       }
       const [rooms, agents, policy] = await Promise.all([

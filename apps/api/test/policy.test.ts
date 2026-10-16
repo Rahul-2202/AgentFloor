@@ -150,3 +150,13 @@ test("a whole new office from onboarding reads back room by room", () => {
   assert.deepEqual(p.next.locks, ["merge"]);
   assert.equal(p.next.rooms[0]!.slot, 1);
 });
+
+test("a new office starts empty, and onboarding builds it", async () => {
+  const { emptySetup } = await import("@agentfloor/shared/setup");
+  const empty = emptySetup("Acme");
+  assert.deepEqual([empty.rooms.length, empty.agents.length, empty.locks], [0, 0, ["merge"]]);
+  const p = propose(empty, [{ op: "add_room", name: "Engineering", head: { name: "Lead", title: "Runs it" } }]);
+  assert.deepEqual(p.readback, ["Open a new room, Engineering, headed by Lead."]);
+  // Budgets can be set before there are any rooms.
+  assert.ok(propose(empty, [{ op: "set_budget", scope: "office", id: "", dailyUsdSoft: 2, dailyUsdHard: 6 }]));
+});
