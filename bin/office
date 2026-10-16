@@ -1,0 +1,4 @@
+#!/bin/sh
+# The office CLI. Agents get this directory on their PATH.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec node --disable-warning=ExperimentalWarning "$DIR/src/cli/office.ts" "$@"

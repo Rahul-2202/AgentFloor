@@ -1,0 +1,228 @@
+{
+  "name": "AgentFloor HQ (scripted demo)",
+  "policy": {
+    "askDeadlineSec": 20,
+    "maxHops": 3,
+    "threadMaxMessages": 20,
+    "huddleMaxTurns": 10,
+    "ceoReach": "heads"
+  },
+  "rooms": [
+    {
+      "id": "dev",
+      "name": "Development",
+      "head": "pm"
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing",
+      "head": "strategist"
+    }
+  ],
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM",
+      "room": "dev",
+      "role": "head",
+      "title": "Runs the Development room: plans work, owns priorities",
+      "runtime": "scripted",
+      "options": {
+        "kickoff": "start",
+        "script": {
+          "onStart": [
+            {
+              "request_work": {
+                "to": "backend",
+                "title": "Slots API for online booking"
+              }
+            },
+            {
+              "request_work": {
+                "to": "frontend",
+                "title": "Booking calendar UI"
+              }
+            },
+            {
+              "ask_ceo": "Booking is ready except SMS reminders. Ship Friday without SMS, or slip to Monday?"
+            }
+          ],
+          "answers": [
+            {
+              "when": "clinic",
+              "say": "Sydney, Leeds and Austin are in the announcement. Test those time zones first."
+            },
+            {
+              "when": "launch|date|ready",
+              "say": "Launch is Friday 10:00. Booking ships behind a flag; the post can go out once the PR merges."
+            },
+            {
+              "when": "regression|test",
+              "say": "Run the full regression on the booking flow before Friday."
+            }
+          ],
+          "fallback": "Not sure yet; I'll check with the CEO."
+        }
+      }
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API and database",
+      "runtime": "scripted",
+      "options": {
+        "script": {
+          "taskSteps": 3,
+          "answers": [
+            {
+              "when": "endpoint|api|shape|field",
+              "say": "GET /slots?clinic=&date= returns [{start, end, practitionerId}], start/end as UTC ISO strings plus the clinic's IANA time zone."
+            }
+          ],
+          "fallback": "I don't know that one; ask the PM.",
+          "onStart": [
+            {
+              "ask": {
+                "to": "frontend",
+                "question": "Do you need slot start times in the clinic local time or UTC? I am about to freeze the response shape."
+              }
+            }
+          ],
+          "huddle": {
+            "replies": [
+              "Yes, I will add clinic {name, address} to the confirmation.",
+              "Adding cancelUrl too: a signed link, valid for 7 days."
+            ]
+          }
+        },
+        "kickoff": "start"
+      },
+      "lessons": [
+        "Store times in UTC; never trust client-local times."
+      ]
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "runtime": "scripted",
+      "options": {
+        "kickoff": "start",
+        "script": {
+          "taskSteps": 5,
+          "onStart": [
+            {
+              "work": 1
+            },
+            {
+              "ask": {
+                "to": "backend",
+                "question": "For the slots endpoint, what's the response shape and are times local or UTC?",
+                "wait": true
+              }
+            },
+            {
+              "huddle": {
+                "with": "backend",
+                "topic": "Booking confirmation payload",
+                "opening": "Can the confirmation response include the clinic's display name and address so I don't need a second call?"
+              }
+            }
+          ],
+          "answers": [
+            {
+              "when": "time ?zone|utc|local",
+              "say": "Send UTC plus the clinic's IANA time zone; I convert on display. We got burned showing raw UTC to the Sydney clinic."
+            }
+          ],
+          "huddle": {
+            "replies": [
+              "Great. And the cancellation link?"
+            ],
+            "outcome": "POST /bookings returns {id, start, end, tz, clinic: {name, address}, cancelUrl}."
+          }
+        }
+      },
+      "lessons": [
+        "Clinics care about local times; the Sydney clinic complained about UTC in v0."
+      ]
+    },
+    {
+      "id": "tester",
+      "name": "Tester",
+      "room": "dev",
+      "role": "member",
+      "title": "QA and regression",
+      "runtime": "scripted",
+      "options": {
+        "kickoff": "start",
+        "script": {
+          "hooks": false,
+          "onStart": [
+            {
+              "ask": {
+                "to": "strategist",
+                "question": "Which clinics are in the launch announcement? I want to test their time zones first."
+              }
+            },
+            {
+              "request_work": {
+                "to": "creator",
+                "title": "Write release notes for the booking flow"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "strategist",
+      "name": "Strategist",
+      "room": "marketing",
+      "role": "head",
+      "title": "Runs Marketing: launch plan and messaging",
+      "runtime": "scripted",
+      "options": {
+        "kickoff": "start",
+        "script": {
+          "onStart": [
+            {
+              "ask": {
+                "to": "pm",
+                "question": "Is booking ready for the launch post on Friday?"
+              }
+            },
+            {
+              "ask": {
+                "to": "creator",
+                "question": "Do we have photos from the Sydney clinic for the launch post?"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "creator",
+      "name": "Creator",
+      "room": "marketing",
+      "role": "member",
+      "title": "Posts and case studies",
+      "runtime": "scripted",
+      "options": {
+        "script": {
+          "answers": [
+            {
+              "when": "draft|copy",
+              "say": "The draft post is ready for review."
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

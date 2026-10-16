@@ -1,0 +1,59 @@
+{
+  "name": "AgentFloor HQ (Claude Code)",
+  "policy": {
+    "askDeadlineSec": 300,
+    "maxHops": 3,
+    "threadMaxMessages": 20,
+    "huddleMaxTurns": 10,
+    "ceoReach": "heads"
+  },
+  "rooms": [
+    {
+      "id": "dev",
+      "name": "Development",
+      "head": "pm"
+    }
+  ],
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM",
+      "room": "dev",
+      "role": "head",
+      "title": "Runs the Development room: plans work, owns priorities",
+      "runtime": "claude-code",
+      "model": "haiku",
+      "effort": "low"
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API and database",
+      "runtime": "claude-code",
+      "options": {
+        "kickoff": "You're starting the slots API for online booking. Before you freeze the response shape, ask Frontend whether slot start times should be sent in the clinic's local time or in UTC, and why. Wait for the answer. Then tell PM the decision in one sentence with inform. Then you're done for now; don't write code yet."
+      },
+      "lessons": [
+        "Store times in UTC in the database."
+      ],
+      "model": "haiku",
+      "effort": "low"
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "runtime": "claude-code",
+      "lessons": [
+        "The Sydney clinic complained in v0 when the calendar showed raw UTC times.",
+        "Our rule since then: the API sends UTC ISO timestamps plus the clinic's IANA time zone (e.g. Australia/Sydney); the UI converts to clinic local time for display."
+      ],
+      "model": "haiku",
+      "effort": "low"
+    }
+  ]
+}

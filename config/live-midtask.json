@@ -1,0 +1,58 @@
+{
+  "name": "AgentFloor HQ (mid-task test)",
+  "policy": {
+    "askDeadlineSec": 300,
+    "maxHops": 3,
+    "threadMaxMessages": 20,
+    "huddleMaxTurns": 10,
+    "ceoReach": "heads"
+  },
+  "rooms": [
+    {
+      "id": "dev",
+      "name": "Development",
+      "head": "pm"
+    }
+  ],
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM",
+      "room": "dev",
+      "role": "head",
+      "title": "Runs the Development room",
+      "runtime": "claude-code",
+      "model": "haiku",
+      "effort": "low"
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "runtime": "claude-code",
+      "options": {
+        "kickoff": "Create the booking UI notes, one file at a time, in this order: notes/1-calendar.md, notes/2-slot-picker.md, notes/3-confirmation.md, notes/4-errors.md, notes/5-a11y.md, notes/6-mobile.md. Each file: a heading and 3 short bullet points. Use the Write tool once per file. If an office message arrives while you work, handle it right away, then continue with the files."
+      },
+      "lessons": [
+        "Our rule: the API sends UTC ISO timestamps plus the clinic's IANA time zone; the UI converts to clinic local time. The Sydney clinic complained about raw UTC in v0."
+      ],
+      "model": "haiku",
+      "effort": "low"
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API",
+      "runtime": "claude-code",
+      "options": {
+        "kickoff": "Ask Frontend: should slot start times in the slots API be local time or UTC? Then wait for the answer and tell PM the decision in one sentence with inform."
+      },
+      "model": "haiku",
+      "effort": "low"
+    }
+  ]
+}

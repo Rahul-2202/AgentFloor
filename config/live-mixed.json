@@ -1,0 +1,60 @@
+{
+  "name": "AgentFloor HQ (three runtimes)",
+  "policy": {
+    "askDeadlineSec": 600,
+    "maxHops": 3,
+    "threadMaxMessages": 20,
+    "huddleMaxTurns": 10,
+    "ceoReach": "heads"
+  },
+  "rooms": [
+    {
+      "id": "dev",
+      "name": "Development",
+      "head": "pm"
+    }
+  ],
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM",
+      "room": "dev",
+      "role": "head",
+      "title": "Runs the Development room",
+      "runtime": "claude-code",
+      "options": {
+        "kickoff": "Ask Backend what the slots API returns and whether it's paginated. Ask Frontend how the booking calendar shows slot times. Send both questions now, then wait for both answers (use wait). Finish with a two-line summary of what they said."
+      },
+      "model": "haiku",
+      "effort": "low"
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API",
+      "runtime": "junie",
+      "options": {
+        "kickoff": "Ask Frontend which timestamp format the booking calendar needs from the API. Then call wait until the answer arrives (answer any office questions that come to you meanwhile with reply). Write the answer to notes/frontend-needs.md."
+      },
+      "lessons": [
+        "GET /slots?clinic=&date= returns [{start, end, practitionerId}]. It is paginated with ?cursor=, 50 slots per page."
+      ]
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "runtime": "antigravity",
+      "options": {
+        "kickoff": "Ask Backend whether the slots endpoint is paginated and how. Then call wait until the answer arrives (answer any office questions that come to you meanwhile with reply). Write the answer to notes/backend.md."
+      },
+      "lessons": [
+        "The calendar needs ISO 8601 UTC timestamps plus the clinic's IANA time zone, and shows times in clinic local time. The Sydney clinic complained about raw UTC in v0."
+      ]
+    }
+  ]
+}

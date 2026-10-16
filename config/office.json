@@ -1,0 +1,73 @@
+{
+  "name": "AgentFloor HQ",
+  "policy": {
+    "askDeadlineSec": 300,
+    "maxHops": 3,
+    "threadMaxMessages": 20,
+    "huddleMaxTurns": 10,
+    "ceoReach": "heads"
+  },
+  "rooms": [
+    {
+      "id": "dev",
+      "name": "Development",
+      "head": "pm"
+    },
+    {
+      "id": "marketing",
+      "name": "Marketing",
+      "head": "strategist"
+    }
+  ],
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM",
+      "room": "dev",
+      "role": "head",
+      "title": "Runs the Development room: plans work, owns priorities"
+    },
+    {
+      "id": "backend",
+      "name": "Backend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking API and database",
+      "lessons": [
+        "Store times in UTC in the database.",
+        "GET /slots?clinic=&date= returns [{start, end, practitionerId}], paginated with ?cursor=, 50 per page."
+      ]
+    },
+    {
+      "id": "frontend",
+      "name": "Frontend",
+      "room": "dev",
+      "role": "member",
+      "title": "Booking UI",
+      "lessons": [
+        "The calendar needs ISO 8601 UTC timestamps plus the clinic IANA time zone and shows clinic local time. The Sydney clinic complained about raw UTC in v0."
+      ]
+    },
+    {
+      "id": "tester",
+      "name": "Tester",
+      "room": "dev",
+      "role": "member",
+      "title": "QA and regression"
+    },
+    {
+      "id": "strategist",
+      "name": "Strategist",
+      "room": "marketing",
+      "role": "head",
+      "title": "Runs Marketing: launch plan and messaging"
+    },
+    {
+      "id": "creator",
+      "name": "Creator",
+      "room": "marketing",
+      "role": "member",
+      "title": "Posts and case studies"
+    }
+  ]
+}

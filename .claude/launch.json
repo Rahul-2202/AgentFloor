@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "office",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "daemon"],
+      "port": 4300
+    },
+    {
+      "name": "office-claude",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "daemon", "--", "--config", "config/live-claude.json", "--data", "data-live", "--port", "4310"],
+      "port": 4310
+    }
+  ]
+}
