@@ -17,7 +17,7 @@ export const claudeCode = cliRuntime({
   prepare(ctx) {
     // In a repo worktree, the agent's memory sits one folder up (Claude Code reads CLAUDE.md
     // from parent folders too), so it never overwrites the repo's own CLAUDE.md or lands in a PR.
-    writeFile(join(ctx.inRepo ? ctx.home : ctx.workdir, "CLAUDE.md"), memoryFile(ctx.agent, ctx.config));
+    writeFile(join(ctx.inRepo ? ctx.home : ctx.workdir, "CLAUDE.md"), memoryFile(ctx.agent, ctx.config, ctx.brief?.() ?? ""));
     writeFile(join(ctx.home, "mcp.json"), JSON.stringify({ mcpServers: { office: officeMcpServer(ctx) } }, null, 2));
     writeFile(
       join(ctx.home, "settings.json"),
@@ -25,7 +25,12 @@ export const claudeCode = cliRuntime({
         {
           // AgentFloor owns agent memory; Claude Code's own auto-memory would leak across agents.
           autoMemoryEnabled: false,
-          hooks: { PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `${join(ctx.root, "bin/office")} hook`, timeout: 10 }] }] },
+          hooks: {
+            // Before every tool call: is the agent allowed (permissions, first-use checks)?
+            PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `${join(ctx.root, "bin/office")} pretool`, timeout: 15 }] }],
+            // After every tool call: questions that are due reach the agent mid-task.
+            PostToolUse: [{ matcher: "*", hooks: [{ type: "command", command: `${join(ctx.root, "bin/office")} hook`, timeout: 10 }] }],
+          },
         },
         null,
         2,
@@ -44,9 +49,9 @@ export const claudeCode = cliRuntime({
       "--strict-mcp-config",
       "--settings", join(ctx.home, "settings.json"),
       "--append-system-prompt", officeInstructions(ctx.agent, ctx.config.repo),
-      // Edits in its own folder and the office are free; anything else is refused.
+      // Its tools run without prompts; the PreToolUse hook enforces the agent's permissions.
       "--permission-mode", "acceptEdits",
-      "--allowedTools", "mcp__office", "Read", "Write", "Edit", "Glob", "Grep", "Bash(office:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(git:*)",
+      "--allowedTools", "mcp__office", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "Bash", "WebFetch", "WebSearch",
     ];
     if (session) args.push("--resume", session);
     // The prompt goes on stdin so variadic flags can't swallow it.

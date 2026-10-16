@@ -11,7 +11,8 @@
     "./env": "./src/env.ts",
     "./link": "./src/link.ts",
     "./setup": "./src/setup.ts",
-    "./prices": "./src/prices.ts"
+    "./prices": "./src/prices.ts",
+    "./governance": "./src/governance.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

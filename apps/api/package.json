@@ -12,10 +12,12 @@
     "dev": "node --watch src/main.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check:supabase": "node scripts/check-supabase.ts"
+    "check:supabase": "node scripts/check-supabase.ts",
+    "check:ada": "node scripts/check-ada.ts"
   },
   "dependencies": {
     "@agentfloor/shared": "*",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.301",
     "@daytona/sdk": "^0.224.1",
     "@fastify/cors": "^11.3.1",
     "@fastify/websocket": "^11.3.4",

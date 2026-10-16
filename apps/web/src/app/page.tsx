@@ -58,7 +58,7 @@ export default function Home() {
         <div className="mt-4">
           <Machine office={state.office} />
         </div>
-        <Console officeId={state.office.id} running />
+        <Console officeId={state.office.id} running onboarded={!!state.office.onboardedAt} />
       </main>
     );
   }

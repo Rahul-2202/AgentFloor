@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Office } from "./office.ts";
+import { classify } from "./permissions.ts";
 import { CEO, OfficeError } from "./types.ts";
 
 /**
@@ -193,7 +194,109 @@ export const TOOLS: ToolSpec[] = [
     run: (o, me, a) => o.requestMerge(me, { pr: a.pr, summary: a.summary, taskId: a.task_id }),
   },
 
+  /* Memory: the office's, in the Control API. */
+  {
+    name: "memory_search",
+    who: "agent",
+    description: "Search office memory you're allowed to read (your notes, your room, and for heads company memory and the CEO's preferences). Check it before asking someone something memory may already answer.",
+    shape: { query: z.string() },
+    run: (o, me, a) => o.memory(me, "search", { query: a.query }),
+  },
+  {
+    name: "memory_read",
+    who: "agent",
+    description: "Read a memory item in full by its id (from your brief or a search). It warns you if the item is stale or superseded.",
+    shape: { id: z.string() },
+    run: (o, me, a) => o.memory(me, "read", { id: a.id }),
+  },
+  {
+    name: "memory_write",
+    who: "agent",
+    description:
+      "Save something durable. Lessons (type lesson) go in your own memory: say how sure you are (confidence 0-1); doubtful or conflicting ones wait for your head. Heads write their room's memory (layer room: charter, state, decisions, team notes); members' room notes become suggestions to the head. Use layer short_term for a scratchpad that's yours alone.",
+    shape: {
+      title: z.string(),
+      body: z.string(),
+      type: z.string().optional().describe("lesson (default), note, decision, charter, state, plan, fact, agreement..."),
+      layer: z.enum(["agent", "room", "short_term"]).optional(),
+      tags: z.array(z.string()).optional(),
+      confidence: z.number().min(0).max(1).optional(),
+      replaces: z.string().optional().describe("The id of an item this one replaces (it's kept, marked superseded)."),
+      derived_from: z.array(z.string()).optional().describe("Ids this was derived from (heads: the company items behind a room version)."),
+    },
+    run: (o, me, a) =>
+      o.memory(me, "write", {
+        title: a.title,
+        body: a.body,
+        type: a.type ?? "lesson",
+        layer: a.layer,
+        tags: a.tags,
+        confidence: a.confidence,
+        replaces: a.replaces,
+        derivedFrom: a.derived_from,
+      }),
+  },
+  {
+    name: "memory_flag",
+    who: "agent",
+    description: "Flag a memory item as stale or wrong, with why. Its owner fixes it.",
+    shape: { id: z.string(), reason: z.string() },
+    run: (o, me, a) => o.memory(me, "flag", { id: a.id, reason: a.reason }),
+  },
+  {
+    name: "memory_review",
+    who: "agent",
+    description: "Heads: your members' new lessons and the suggestions waiting for you. Accept or reject them.",
+    shape: {},
+    run: (o, me) => o.memory(me, "review", {}),
+  },
+  {
+    name: "memory_accept",
+    who: "agent",
+    description: "Heads: accept a lesson or suggestion that's waiting for you.",
+    shape: { id: z.string() },
+    run: (o, me, a) => o.memory(me, "accept", { id: a.id }),
+  },
+  {
+    name: "memory_reject",
+    who: "agent",
+    description: "Heads: reject a lesson or suggestion (even one already accepted), with why.",
+    shape: { id: z.string(), why: z.string() },
+    run: (o, me, a) => o.memory(me, "reject", { id: a.id, why: a.why }),
+  },
+
+  /* Governance and meetings. */
+  {
+    name: "request_permission",
+    who: "agent",
+    description: "Ask the CEO to allow something you're not allowed to do (push, network, outside_worktree, open_pr, close_tickets), with why.",
+    shape: { permission: z.string(), why: z.string() },
+    run: (o, me, a) => o.requestPermission(me, { permission: a.permission, why: a.why }),
+  },
+  {
+    name: "request_meeting",
+    who: "agent",
+    description: "Heads: ask for a meeting with the CEO (and other heads) about a decision. State why and the options; Ada books it or answers in the inbox.",
+    shape: { topic: z.string(), why: z.string(), attendees: z.array(z.string()).optional().describe("Other heads to include."), options: z.array(z.string()).optional() },
+    run: (o, me, a) => o.requestMeeting(me, { topic: a.topic, why: a.why, attendees: a.attendees, options: a.options }),
+  },
+
   /* Runtime adapters and hooks: pull what's due at a delivery point. */
+  {
+    name: "permission_check",
+    who: "runtime",
+    description: "Before a tool call (Claude Code PreToolUse hook): may the agent do this?",
+    shape: { tool: z.string(), input: z.record(z.string(), z.unknown()), cwd: z.string().optional() },
+    run: (o, me, a) => {
+      const roots = o.hooks.rootsOf?.(me);
+      if (!roots) return { allow: true };
+      for (const need of classify(a.tool, a.input, { ...roots, cwd: a.cwd })) {
+        const r = o.checkPermission(me, need.permission, need.detail);
+        if (!r.allow) return r;
+      }
+      return { allow: true };
+    },
+  },
   {
     name: "git_credential",
     who: "runtime",
@@ -253,6 +356,27 @@ export const TOOLS: ToolSpec[] = [
     description: "Mark an inbox item done.",
     shape: { id: z.string() },
     run: (o, _me, a) => o.resolveInbox(a.id),
+  },
+  {
+    name: "ceo_answer_permission",
+    who: "ceo",
+    description: "Answer an agent's permission ask: allow (once; for a first use, from now on) or refuse.",
+    shape: { inbox_id: z.string(), allow: z.boolean(), note: z.string().optional() },
+    run: (o, _me, a) => o.answerPermission(a.inbox_id, a.allow, a.note),
+  },
+  {
+    name: "ceo_start_meeting",
+    who: "ceo",
+    description: "Open a meeting with heads (a thread in the meeting format).",
+    shape: { topic: z.string(), attendees: z.array(z.string()), agenda: z.array(z.string()).optional(), chair: z.enum(["ceo", "ada"]).optional(), meeting_id: z.string().optional() },
+    run: (o, _me, a) => o.startMeeting({ topic: a.topic, attendees: a.attendees, agenda: a.agenda ?? [], chair: a.chair ?? "ceo", meetingId: a.meeting_id }),
+  },
+  {
+    name: "ceo_end_meeting",
+    who: "ceo",
+    description: "End a meeting.",
+    shape: { thread_id: z.string(), outcome: z.string() },
+    run: (o, _me, a) => o.endMeeting({ threadId: a.thread_id, outcome: a.outcome }),
   },
   {
     name: "ceo_hold_agent",

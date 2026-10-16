@@ -71,9 +71,20 @@ export interface SpendSum {
 export interface OfficeSetupView {
   name: string;
   policy: Record<string, number | string>;
-  rooms: { id: string; name: string; head: string; purpose?: string; responsibilities?: string; dod?: string }[];
-  agents: { id: string; name: string; room: string; role: string; title: string; runtime: string; model?: string; effort?: string }[];
+  rooms: {
+    id: string;
+    name: string;
+    head: string;
+    purpose?: string;
+    responsibilities?: string;
+    dod?: string;
+    permissions?: Record<string, "free" | "ask" | "never">;
+    whenBlocked?: string;
+    publish?: string;
+  }[];
+  agents: { id: string; name: string; room: string; role: string; title: string; runtime: string; model?: string; effort?: string; permissions?: Record<string, "free" | "ask" | "never"> }[];
   budgets: { scope: string; id: string; dailyUsdSoft?: number | null; dailyUsdHard?: number | null }[];
+  locks: ("merge" | "permissions" | "budgets" | "protocol" | "when_blocked" | "publish")[];
 }
 
 async function post<T>(path: string, body: object): Promise<T> {
@@ -110,3 +121,58 @@ export const requestChanges = (n: number, comment: string, inboxId?: string) => 
 
 /** Lets a parked agent carry on. */
 export const releaseAgent = (id: string) => post<unknown>(`/office/agents/${encodeURIComponent(id)}/release`, {});
+
+/* ------------------------------------------------------------------ M3–M5 */
+
+export interface AdaCard {
+  id: string;
+  type: "proposal";
+  readback: string[];
+  summary: string;
+  state: "pending" | "applied" | "dismissed" | "stale";
+  version?: number;
+}
+export type AdaEvent = { type: "text"; delta: string } | { type: "card"; card: AdaCard } | { type: "done"; message: { content: string; cards: AdaCard[] } } | { type: "error"; message: string };
+
+/** Talks to Ada; her reply streams back event by event. */
+export async function adaChat(message: string, onEvent: (e: AdaEvent) => void): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/office/ada/chat`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${data.session?.access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ message }),
+  });
+  if (!res.ok || !res.body) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? res.statusText, []);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const chunk = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      if (chunk.startsWith("data: ")) onEvent(JSON.parse(chunk.slice(6)));
+    }
+  }
+}
+export const confirmAdaCard = (id: string) => post<{ version: number }>(`/office/ada/cards/${id}/confirm`, {});
+export const dismissAdaCard = (id: string) => post<unknown>(`/office/ada/cards/${id}/dismiss`, {});
+export const adaBriefing = () => post<{ briefing: string }>("/office/ada/briefing", {});
+
+export const scheduleMeeting = (m: { title: string; attendees: string[]; agenda: string[]; chair?: "ada" | "ceo" }) => post<unknown>("/office/meetings", m);
+export const startMeeting = (id: string) => post<unknown>(`/office/meetings/${id}/start`, {});
+export const endMeeting = (id: string) => post<unknown>(`/office/meetings/${id}/end`, {});
+export const meetingMinutes = (id: string) =>
+  api<{ minutes: { summary: string; decisions: { text: string; rationale?: string }[]; actionItems: { text: string; owner: string; taskId?: string; status: string }[] } | null }>(`/office/meetings/${id}/minutes`);
+
+export const writeMemory = (item: { layer: string; scopeId?: string; type: string; title: string; body: string; tags?: string[]; replaces?: string }) => post<unknown>("/office/memory", item);
+export const editMemory = (id: string, patch: { title?: string; body?: string }) =>
+  api<unknown>(`/office/memory/${id}`, { method: "PATCH", body: JSON.stringify(patch), headers: { "content-type": "application/json" } });
+export const flagMemory = (id: string, reason: string) => post<unknown>(`/office/memory/${id}/flag`, { reason });
+export const acceptMemory = (id: string) => post<unknown>(`/office/memory/${id}/accept`, {});
+export const rejectMemory = (id: string, why: string) => post<unknown>(`/office/memory/${id}/reject`, { why });
+
+export const answerPermission = (inboxId: string, allow: boolean, note?: string) => post<unknown>(`/office/permissions/${encodeURIComponent(inboxId)}`, { allow, note });

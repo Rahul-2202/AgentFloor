@@ -66,12 +66,16 @@ export class OfficeLink {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flush();
     const ws = this.ws;
+    this.ws = null;
     if (ws && ws.readyState === WebSocket.OPEN) {
       await new Promise<void>((ok) => {
         ws.addEventListener("close", () => ok(), { once: true });
         ws.close(1000, "daemon stopping");
         setTimeout(ok, 1000);
       });
+    } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+      // Halfway through a reconnect: abandon it, or its welcome would arrive after the office has closed.
+      ws.close();
     }
     this.state = "closed";
   }
@@ -95,7 +99,10 @@ export class OfficeLink {
     const ws = new WebSocket(this.opts.url);
     this.ws = ws;
     ws.addEventListener("open", () => this.send({ t: "hello", token: this.opts.token, version: "1" }));
-    ws.addEventListener("message", (e) => this.onMessage(JSON.parse(String(e.data)) as ApiMessage));
+    ws.addEventListener("message", (e) => {
+      if (this.stopped || this.ws !== ws) return; // a stopped or replaced link ignores late messages
+      this.onMessage(JSON.parse(String(e.data)) as ApiMessage);
+    });
     ws.addEventListener("error", () => {}); // followed by close
     ws.addEventListener("close", (e) => {
       if (this.ws !== ws) return;
@@ -148,6 +155,9 @@ export class OfficeLink {
         else r.fail(new OfficeError(msg.error.code, msg.error.message));
         return;
       }
+      case "brief":
+        this.opts.office.setBrief(msg.agent, msg.text);
+        return;
       case "config":
         try {
           this.opts.office.applyConfig(msg.config);

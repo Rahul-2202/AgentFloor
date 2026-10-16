@@ -3,6 +3,7 @@
  * versioned; the policy engine is the only way it changes; the daemon gets the
  * part it runs on (OfficeConfig).
  */
+import type { LockTarget } from "./governance.ts";
 import type { AgentDef, OfficeConfig, Policy, RoomDef } from "./types.ts";
 
 export const DEFAULT_POLICY: Policy = {
@@ -41,6 +42,8 @@ export interface OfficeSetup {
   rooms: RoomSetup[];
   agents: AgentDef[];
   budgets: Budget[];
+  /** Settings that can't be changed from chat (only the CEO unlocks them, in the UI). */
+  locks: LockTarget[];
 }
 
 /** The part of the setup the office daemon runs on. */
@@ -48,7 +51,7 @@ export function toDaemonConfig(s: OfficeSetup): OfficeConfig {
   return {
     name: s.name,
     policy: s.policy,
-    rooms: s.rooms.map(({ id, name, head }) => ({ id, name, head })),
+    rooms: s.rooms.map(({ id, name, head, permissions, whenBlocked, publish }) => ({ id, name, head, permissions, whenBlocked, publish })),
     agents: s.agents,
   };
 }
@@ -69,8 +72,8 @@ export function defaultSetup(name: string): OfficeSetup {
     name,
     policy: { ...DEFAULT_POLICY },
     rooms: [
-      { id: "dev", name: "Development", head: "pm", purpose: "Builds and ships the product", slot: 1 },
-      { id: "marketing", name: "Marketing", head: "strategist", purpose: "Launches and tells the story", slot: 2 },
+      { id: "dev", name: "Development", head: "pm", purpose: "Builds and ships the product", slot: 1, whenBlocked: "park_and_switch", publish: "drafts" },
+      { id: "marketing", name: "Marketing", head: "strategist", purpose: "Launches and tells the story", slot: 2, whenBlocked: "park_and_switch", publish: "drafts" },
     ],
     agents: [
       agent("pm", "PM", "dev", "head", "Runs the Development room: plans work, owns priorities"),
@@ -81,5 +84,6 @@ export function defaultSetup(name: string): OfficeSetup {
       agent("creator", "Creator", "marketing", "member", "Posts and case studies"),
     ],
     budgets: [{ scope: "office", id: "", dailyUsdSoft: 5, dailyUsdHard: 20 }],
+    locks: ["merge"],
   };
 }

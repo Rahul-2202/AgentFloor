@@ -26,6 +26,12 @@ const schema = z.object({
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
+  /** Ada runs on the company's Claude login (claude setup-token). Without it, Ada is off. */
+  AGENTFLOOR_CLAUDE_TOKEN: z.string().optional(),
+  ADA_MODEL: z.string().default("haiku"),
+  ADA_EFFORT: z.enum(["low", "medium", "high"]).default("low"),
+  /** Hour of the day (UTC) for Ada's daily briefing. */
+  BRIEFING_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(7),
 });
 
 export interface Config {
@@ -38,6 +44,7 @@ export interface Config {
   webOrigins: string[];
   daytona: { apiKey: string; snapshot: string; kind: "container" | "vm"; claudeSecret: string; linkUrl: string } | null;
   github: { appId: string; slug: string; privateKey: string; webhookSecret: string } | null;
+  ada: { token: string; model: string; effort: "low" | "medium" | "high"; briefingHourUtc: number } | null;
 }
 
 /** Reads and checks the environment; throws one error naming every missing or bad variable. */
@@ -59,6 +66,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     webOrigins: e.WEB_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     daytona: daytonaConfig(e),
     github: githubConfig(e),
+    ada: e.AGENTFLOOR_CLAUDE_TOKEN ? { token: e.AGENTFLOOR_CLAUDE_TOKEN, model: e.ADA_MODEL, effort: e.ADA_EFFORT, briefingHourUtc: e.BRIEFING_HOUR_UTC } : null,
   };
 }
 

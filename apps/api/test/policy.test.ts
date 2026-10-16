@@ -92,3 +92,61 @@ test("ids come from names, stay unique, and avoid reserved words", () => {
   assert.equal(uniqueId("CEO", []), "ceo-1");
   assert.equal(uniqueId("3D artist", []), "a-3d-artist");
 });
+
+test("permissions read back per person, and fall back when cleared", () => {
+  const p = propose(office(), [
+    { op: "set_permission", scope: "agent", id: "backend", permission: "network", level: "ask" },
+    { op: "set_permission", scope: "room", id: "marketing", permission: "push", level: "never" },
+  ]);
+  assert.deepEqual(p.readback, ["Marketing: everyone in it can never push branches.", "Backend must ask you before they reach the internet."]);
+  const back = propose(p.next, [{ op: "set_permission", scope: "agent", id: "backend", permission: "network", level: null }]);
+  assert.deepEqual(back.readback, ["Backend: reach the internet goes back to the room's setting."]);
+  assert.equal(back.next.agents.find((a) => a.id === "backend")!.permissions, undefined);
+});
+
+test("when-blocked and publishing per room", () => {
+  const p = propose(office(), [
+    { op: "set_when_blocked", room: "dev", policy: "best_guess_and_flag" },
+    { op: "set_publish", room: "dev", mode: "direct" },
+  ]);
+  assert.deepEqual(p.readback, [
+    "When someone in Development is blocked, they make your best guess, carry on, and flag the guess clearly so it can be checked.",
+    "Development opens PRs ready for review, not as drafts.",
+  ]);
+});
+
+test("locks: Ada can't touch a locked setting or unlock anything; the CEO can", () => {
+  const locked = propose(office(), [{ op: "lock", target: "budgets" }]).next;
+  assert.throws(() => propose(locked, [{ op: "set_budget", scope: "office", id: "", dailyUsdSoft: 50, dailyUsdHard: 100 }], "ada"), /That's locked: daily budgets/);
+  assert.throws(() => propose(locked, [{ op: "unlock", target: "budgets" }], "ada"), /Only you can unlock/);
+  // Unlocked things are still Ada's to propose.
+  assert.ok(propose(locked, [{ op: "hire_agent", room: "dev", name: "Designer", title: "Design" }], "ada"));
+  // The CEO, in the UI, can.
+  assert.ok(propose(locked, [{ op: "set_budget", scope: "office", id: "", dailyUsdSoft: 50, dailyUsdHard: 100 }], "ceo"));
+  const unlocked = propose(locked, [{ op: "unlock", target: "budgets" }], "ceo");
+  assert.deepEqual(unlocked.readback, ["Unlock: daily budgets can be changed from chat again."]);
+  assert.throws(() => propose(office(), [{ op: "unlock", target: "merge" }], "ceo"), /always locked/);
+});
+
+test("a whole new office from onboarding reads back room by room", () => {
+  const p = propose(office(), [
+    {
+      op: "replace_setup",
+      setup: {
+        name: "Bright Dental",
+        rooms: [{ id: "eng", name: "Engineering", head: "lead", purpose: "The booking app" }],
+        agents: [
+          { id: "lead", name: "Lead", room: "eng", role: "head", title: "Runs Engineering", runtime: "claude-code" },
+          { id: "dev", name: "Dev", room: "eng", role: "member", title: "Builds features", runtime: "claude-code" },
+        ],
+        budgets: [{ scope: "office", id: "", dailyUsdSoft: 3, dailyUsdHard: 10 }],
+      },
+    },
+  ], "ada");
+  assert.equal(p.readback[0], 'Rename the office to "Bright Dental" (was "Acme").');
+  assert.ok(p.readback.includes("Open a new room, Engineering: The booking app, headed by Lead."));
+  assert.ok(p.readback.includes("Hire Dev into Engineering as Builds features, on Claude Code, Claude Haiku, low effort."));
+  assert.ok(p.readback.some((l) => l.startsWith("Close Development")));
+  assert.deepEqual(p.next.locks, ["merge"]);
+  assert.equal(p.next.rooms[0]!.slot, 1);
+});

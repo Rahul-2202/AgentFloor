@@ -79,6 +79,14 @@ export class OfficeHub {
     return true;
   }
 
+  /** Sends an agent its memory brief. */
+  sendBrief(officeId: string, agent: string, text: string): boolean {
+    const conn = this.conns.get(officeId);
+    if (!conn) return false;
+    send(conn.socket, { t: "brief", agent, text });
+    return true;
+  }
+
   /** Runs one of the daemon's office calls as the CEO. */
   call(officeId: string, name: string, args: unknown, timeoutMs = 30_000): Promise<unknown> {
     const conn = this.conns.get(officeId);

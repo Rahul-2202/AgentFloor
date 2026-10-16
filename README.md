@@ -45,6 +45,24 @@ What the API does for an office (M2):
   short-lived tokens for the office's repo only. Each agent works in its own worktree; agents open
   PRs, heads ask for merges, and only the CEO merges.
 
+Ada, memory and governance (M3–M5):
+
+- **Ada** (`apps/api/src/ada`): the office manager, on the Claude Agent SDK with the company's
+  Claude login (`AGENTFLOOR_CLAUDE_TOKEN`). She chats with the CEO (streamed), runs the onboarding
+  interview for a new office, triages the inbox, books meetings with pre-reads and writes their
+  minutes, and writes a daily briefing. She changes the setup only by proposing read-back cards
+  the CEO confirms; she can't touch locked rules or unlock them. `npm run check:ada -w @agentfloor/api`
+  checks her live (one small Haiku run).
+- **Memory** (`apps/api/src/memory`): layers (company, CEO preferences, room, agent, conversation,
+  scratchpad) with owners and readers, versions, links, stale flags; lessons auto-accepted unless
+  doubtful or conflicting; conversations, huddle agreements and the CEO's decisions become memory
+  on their own; each agent's memory file is rewritten before every turn with its brief.
+- **Governance**: permissions per agent and room (free, ask, never), enforced by a Claude Code
+  PreToolUse hook; the first use of a powerful permission asks the CEO; when-blocked and drafts
+  per room; locks; an audit trail.
+- **Code updates**: on start, an office machine running other daemon code gets this deploy's code
+  (its data stays), so releases reach existing offices without rebuilding them.
+
 Office VMs (Daytona): with `DAYTONA_API_KEY` and `OFFICE_SNAPSHOT` set, the
 API creates each office's VM on its first **Start office**, resumes it later,
 and lets it pause after 15 quiet minutes (memory kept, agents carry on). The

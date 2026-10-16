@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { CATALOG } from "./catalog.ts";
 import { checkConfig } from "./config.ts";
+import { levelFor, PERMISSIONS, type Level, type Permission } from "@agentfloor/shared/governance";
 import { Store } from "./store.ts";
 import {
   CEO,
@@ -33,6 +34,8 @@ export interface OfficeHooks {
   api?: (name: string, args: unknown) => Promise<unknown>;
   /** Pushes the agent's current branch and returns its name. */
   push?: (agent: string) => Promise<string>;
+  /** The agent's working folder and home (for judging what a tool call touches). */
+  rootsOf?: (agent: string) => { workdir: string; home: string };
 }
 
 export interface OutputLine {
@@ -57,7 +60,7 @@ export interface Usage {
 function deliverableAt(m: Message, point: DeliveryPoint): boolean {
   if (point === "turn_end") return true;
   if (point === "now") return m.urgency === "stop";
-  return m.urgency !== "normal" || m.type === "ask" || m.type === "answer" || m.type === "huddle";
+  return m.urgency !== "normal" || m.type === "ask" || m.type === "answer" || m.type === "huddle" || m.type === "meeting";
 }
 
 /**
@@ -192,6 +195,7 @@ export class Office {
   }
 
   private limitOf(t: Thread): number {
+    if (t.kind === "meeting") return this.config.policy.threadMaxMessages * 3;
     return t.kind === "huddle" ? this.config.policy.huddleMaxTurns : this.config.policy.threadMaxMessages;
   }
 
@@ -330,6 +334,7 @@ export class Office {
     if (t.state === "resolved") throw new OfficeError("thread_closed", `Thread ${t.id} is resolved. Start a new one with ask or inform.`);
 
     const huddle = t.kind === "huddle";
+    const meeting = t.kind === "meeting";
     if (from === CEO && t.state === "escalated") {
       // The CEO unblocks it: the thread reopens with a fresh budget.
       t.state = "open";
@@ -337,13 +342,13 @@ export class Office {
     }
     if (t.awaiting && t.awaiting.by !== from) t.awaiting = null;
     const to = t.participants.filter((p) => p !== from && p !== OFFICE);
-    const msgs = this.post(t, from, to, huddle ? "huddle" : "answer", a.text, huddle ? "urgent" : "normal", a.refs);
+    const msgs = this.post(t, from, to, meeting ? "meeting" : huddle ? "huddle" : "answer", a.text, huddle || meeting ? "urgent" : "normal", a.refs);
     if (huddle && t.state === "open") {
       // Each huddle turn waits on the others; the deadline keeps it moving.
       const next = to.find((p) => p !== CEO);
       if (next) t.awaiting = { by: from, from: next, deadlineAt: this.now() + this.config.policy.askDeadlineSec * 1000 };
     }
-    if (a.resolves && !huddle) t.state = "resolved";
+    if (a.resolves && !huddle && !meeting) t.state = "resolved";
     else if (t.state === "escalated" && !t.awaiting && t.sent < this.limitOf(t)) t.state = "open";
     this.saveThread(t, a.resolves ? "resolved" : "reply");
     if (!t.awaiting) this.resolveInboxFor(t.id);
@@ -611,9 +616,11 @@ export class Office {
       .map((m) => {
         const t = this.store.getThread(m.threadId);
         const from = m.from === OFFICE ? "Office" : m.from === CEO ? "CEO" : `${this.nameOf(m.from)} (${m.from})`;
-        const kind = t?.kind === "huddle" ? "huddle" : m.type;
+        const kind = t?.kind === "huddle" ? "huddle" : t?.kind === "meeting" ? "meeting" : m.type;
         const how =
-          m.type === "ask" || (t?.kind === "huddle" && t.state === "open")
+          t?.kind === "meeting" && t.state === "open"
+            ? `You're in a meeting. Reply with reply(thread_id="${m.threadId}", ...), keep to the agenda and the format, and be brief.`
+            : m.type === "ask" || (t?.kind === "huddle" && t.state === "open")
             ? `Answer with reply(thread_id="${m.threadId}", ...).`
             : m.type === "request_work"
               ? `This is new work for you${t?.taskId ? ` (task ${t.taskId})` : ""}; update it with update_task.`
@@ -842,6 +849,12 @@ export class Office {
     if (!this.hooks.api || !this.hooks.push) throw new OfficeError("offline", "The office isn't connected to AgentFloor, so it can't reach GitHub.");
     const task = a.taskId ? this.store.getTask(a.taskId) : undefined;
     if (a.taskId && !task) throw new OfficeError("unknown_task", `No task "${a.taskId}".`);
+    for (const p of ["push", "open_pr"] as const) {
+      const ok = this.checkPermission(agent, p, `open a PR: ${a.title}`);
+      if (!ok.allow) throw new OfficeError("permission", ok.reason!);
+    }
+    // The room's publish mode: drafts for the CEO to review first, unless the room publishes directly.
+    const draft = a.draft ?? this.config.rooms.find((r) => r.id === me.room)?.publish !== "direct";
     let branch: string;
     try {
       branch = await this.hooks.push(agent);
@@ -849,10 +862,10 @@ export class Office {
       throw new OfficeError("git", (err as Error).message);
     }
     const body = [a.body ?? "", task ? `\n\nOffice task ${task.id}: ${task.title}` : "", `\n\nOpened by ${me.name} (AgentFloor).`].join("");
-    const pr = (await this.hooks.api("open_pr", { head: branch, base: repo.defaultBranch, title: a.title, body, draft: a.draft ?? false })) as { number: number; url: string };
+    const pr = (await this.hooks.api("open_pr", { head: branch, base: repo.defaultBranch, title: a.title, body, draft })) as { number: number; url: string };
     if (task) this.updateTask(agent === task.owner || agent === this.headOf(task.room) ? agent : CEO, { taskId: task.id, output: { kind: "pr", title: `#${pr.number} ${a.title}`, url: pr.url } });
     this.emit("pr.opened", { agent, number: pr.number, url: pr.url, branch, taskId: task?.id ?? null });
-    return { ...pr, branch };
+    return { ...pr, branch, draft };
   }
 
   /** Heads ask the CEO to merge a PR. Merging is the CEO's alone (a locked rule): it lands in the inbox. */
@@ -865,6 +878,152 @@ export class Office {
     this.post(t, from, [CEO], "ask", `Please merge PR #${a.pr}: ${a.summary}\n${url}`, "normal");
     const item = this.addInbox({ kind: "approval", from, threadId: t.id, title: `Merge PR #${a.pr}`, body: a.summary, action: { type: "merge", pr: a.pr, url, repo: repo.fullName } });
     return { threadId: t.id, inboxId: item.id };
+  }
+
+  /* --------------------------------------------------------------- memory */
+
+  private readonly briefs = new Map<string, string>();
+
+  /** The agent's memory brief from the Control API, written into its memory file before each turn. */
+  setBrief(agent: string, text: string): void {
+    this.briefs.set(agent, text);
+  }
+
+  briefOf(agent: string): string {
+    return this.briefs.get(agent) ?? "";
+  }
+
+  /** Office memory lives in the Control API; agents reach it through these calls. */
+  async memory(agent: string, op: string, args: Record<string, unknown>): Promise<unknown> {
+    this.agent(agent);
+    if (!this.hooks.api) throw new OfficeError("offline", "Office memory isn't reachable right now (the office isn't connected to AgentFloor). Keep notes in your folder and save them later.");
+    return this.hooks.api("memory", { agent, op, args });
+  }
+
+  /* ---------------------------------------------------------- permissions */
+
+  permissionLevel(agent: string, p: Permission): Level {
+    return levelFor(this.agent(agent), this.config.rooms, p);
+  }
+
+  /**
+   * May the agent do this now? "never" is refused; "ask" asks the CEO (once per
+   * request; a granted ask is used up); the first use of a powerful permission
+   * asks the CEO even when it's free, and is remembered once allowed.
+   */
+  checkPermission(agent: string, p: Permission, detail: string): { allow: boolean; reason?: string } {
+    const info = PERMISSIONS.find((x) => x.id === p)!;
+    const level = this.permissionLevel(agent, p);
+    const label = info.label.toLowerCase();
+    if (level === "never") {
+      return { allow: false, reason: `You're not allowed to ${label} (${info.covers}). If you need to, ask for it with request_permission and keep working on what you can.` };
+    }
+    const firstUse = level === "free" && info.powerful && !this.store.getKv(`firstuse:${agent}:${p}`);
+    if (level === "free" && !firstUse) return { allow: true };
+    const grants = this.store.getKv<number>(`grant:${agent}:${p}`) ?? 0;
+    if (grants > 0) {
+      this.store.setKv(`grant:${agent}:${p}`, grants - 1);
+      return { allow: true };
+    }
+    // One open request per agent and permission.
+    const pending = this.store.inbox().find((i) => i.state === "open" && i.action?.type === "permission" && i.action.agent === agent && i.action.permission === p);
+    const item =
+      pending ??
+      this.addInbox({
+        kind: "permission",
+        from: agent,
+        threadId: null,
+        title: `${this.nameOf(agent)} ${firstUse ? "wants to" : "asks to"} ${label}${firstUse ? " for the first time" : ""}`,
+        body: detail.slice(0, 600),
+        action: { type: "permission", agent, permission: p, detail: detail.slice(0, 600), firstUse },
+      });
+    this.emit("permission.asked", { agent, permission: p, detail: detail.slice(0, 300), inboxId: item.id, firstUse });
+    return {
+      allow: false,
+      reason: `${firstUse ? "The first time you " + label + ", the CEO checks it" : "You need the CEO's OK to " + label}. I've asked (inbox ${item.id}). Carry on with other work; you'll get a message when they answer, then try again.`,
+    };
+  }
+
+  /** The CEO answers a permission ask: allow once (or for good, for a first use), or refuse. */
+  answerPermission(inboxId: string, allow: boolean, note?: string) {
+    const item = this.store.getInbox(inboxId);
+    if (!item || item.action?.type !== "permission") throw new OfficeError("unknown_inbox", `No permission request "${inboxId}".`);
+    const { agent, permission, firstUse } = item.action;
+    const info = PERMISSIONS.find((x) => x.id === permission)!;
+    if (allow) {
+      if (firstUse) this.store.setKv(`firstuse:${agent}:${permission}`, true);
+      else this.store.setKv(`grant:${agent}:${permission}`, (this.store.getKv<number>(`grant:${agent}:${permission}`) ?? 0) + 1);
+    }
+    this.resolveInbox(inboxId);
+    this.emit("permission.answered", { agent, permission, allow, inboxId });
+    const t = this.newThread("message", CEO, [CEO, agent], `Permission: ${info.label}`);
+    this.post(t, CEO, [agent], "inform", allow ? `Yes, go ahead and ${info.label.toLowerCase()}${note ? `. ${note}` : "."} Try again now.` : `No, don't ${info.label.toLowerCase()}${note ? `: ${note}` : "."} Find another way, or ask your head.`, "urgent");
+    t.state = "resolved";
+    this.saveThread(t, "resolved");
+    return { allowed: allow };
+  }
+
+  /** An agent asks for a permission to change; it goes to the CEO (Ada triages it). */
+  requestPermission(agent: string, a: { permission: string; why: string }) {
+    const me = this.agent(agent);
+    const info = PERMISSIONS.find((x) => x.id === a.permission);
+    if (!info) throw new OfficeError("bad_input", `Permissions are: ${PERMISSIONS.map((p) => p.id).join(", ")}.`);
+    const item = this.addInbox({
+      kind: "permission_request",
+      from: agent,
+      threadId: null,
+      title: `${me.name} asks to be allowed to ${info.label.toLowerCase()}`,
+      body: a.why,
+      action: { type: "permission_request", agent, permission: info.id, why: a.why },
+    });
+    return { inboxId: item.id, note: "Asked. The CEO decides; you'll hear back." };
+  }
+
+  /* ------------------------------------------------------------- meetings */
+
+  /** Heads ask for a meeting with the CEO; it goes to the inbox, where Ada triages it. */
+  requestMeeting(from: string, a: { topic: string; why: string; attendees?: string[]; options?: string[] }) {
+    const me = this.agent(from);
+    if (me.role !== "head") throw new OfficeError("not_allowed", `Meetings with the CEO are for heads. Raise it with ${this.nameOf(this.headOf(me.room))}.`);
+    const attendees = [...new Set([from, ...(a.attendees ?? [])])];
+    for (const id of attendees) this.agent(id);
+    const item = this.addInbox({
+      kind: "meeting_request",
+      from,
+      threadId: null,
+      title: `Meeting: ${a.topic}`,
+      body: [a.why, a.options?.length ? `Options:\n${a.options.map((o, i) => `${i + 1}. ${o}`).join("\n")}` : ""].filter(Boolean).join("\n\n"),
+      action: { type: "meeting", topic: a.topic, why: a.why, attendees, options: a.options },
+    });
+    return { inboxId: item.id, note: "Requested. Ada books it with the CEO, or answers in the inbox." };
+  }
+
+  /** The CEO (or Ada as chair) opens a meeting: a thread with the attendees, in the meeting format. */
+  startMeeting(a: { topic: string; attendees: string[]; agenda: string[]; chair: string; meetingId?: string }) {
+    for (const id of a.attendees) this.agent(id);
+    const t = this.newThread("meeting", CEO, [CEO, ...a.attendees], a.topic);
+    const body = [
+      `Meeting: ${a.topic}. Chair: ${a.chair === "ada" ? "Ada" : "the CEO"}.`,
+      a.agenda.length ? `Agenda:\n${a.agenda.map((x, i) => `${i + 1}. ${x}`).join("\n")}` : "",
+      "How it runs: (1) the head who raised it states the question and their recommendation; (2) discussion; (3) a decision, or an explicit deferral with an owner and a date; (4) each head reads back what they'll do.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    this.post(t, CEO, a.attendees, "meeting", body, "urgent");
+    this.emit("meeting.started", { threadId: t.id, meetingId: a.meetingId ?? null, attendees: a.attendees, topic: a.topic });
+    return { threadId: t.id };
+  }
+
+  endMeeting(a: { threadId: string; outcome: string }) {
+    const t = this.thread(a.threadId);
+    if (t.kind !== "meeting") throw new OfficeError("not_meeting", `${t.id} is not a meeting.`);
+    if (t.state === "resolved") throw new OfficeError("thread_closed", "That meeting already ended.");
+    t.state = "resolved";
+    t.outcome = a.outcome;
+    this.saveThread(t, "meeting_ended");
+    for (const p of t.participants) if (p !== CEO) this.queueNotice(t, p, `The meeting "${t.topic}" ended. ${a.outcome}`, "urgent");
+    this.emit("meeting.ended", { threadId: t.id, outcome: a.outcome });
+    return { threadId: t.id };
   }
 
   /* ------------------------------------------------------- office setup */

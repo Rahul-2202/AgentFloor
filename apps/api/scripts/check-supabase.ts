@@ -6,7 +6,10 @@ import { createClient } from "@supabase/supabase-js";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.ts";
 import { newOfficeToken, parseOfficeToken, secretMatches } from "@agentfloor/shared/link";
+import { supabaseOfficeData } from "../src/ada/data.ts";
 import { supabaseBudgetStore } from "../src/budgets.ts";
+import { MemoryService } from "../src/memory/service.ts";
+import { supabaseMemoryStore } from "../src/memory/store.ts";
 import { supabaseLinkStore } from "../src/link/store.ts";
 import { propose } from "../src/policy/engine.ts";
 import { Projector, supabaseProjectionStore } from "../src/projection/writer.ts";
@@ -102,6 +105,43 @@ try {
   const alerts = (await admin.from("inbox_items").select("title").eq("office_id", officeId).like("id", "B-%")).data!;
   assert.deepEqual(alerts.map((a) => a.title), ["t"], "a second alert with the same id is ignored");
   console.log("projection, spend and budget alerts against Supabase: ok");
+
+  // Memory: write, search, versions on edit, merged flags, links.
+  const setupNow = (await setups.load(officeId)).setup;
+  const memStore = supabaseMemoryStore(db);
+  const mem = new MemoryService(memStore);
+  const company = (await mem.write(officeId, setupNow, "ada", { layer: "company", type: "fact", title: "Launch date", body: "March 1" })).item;
+  const derived = (await mem.write(officeId, setupNow, "pm", { layer: "room", type: "plan", title: "Dev launch plan", body: "Freeze Feb 20", derivedFrom: [company.id] })).item;
+  assert.equal((await mem.search(officeId, setupNow, "pm", "launch plan"))[0]?.id, derived.id);
+  assert.ok(!(await mem.search(officeId, setupNow, "backend", "launch date")).some((i) => i.id === company.id), "members don't see company memory");
+  await mem.flag(officeId, setupNow, "pm", company.id, "moved");
+  await mem.flag(officeId, setupNow, "strategist", company.id, "heard May");
+  const flags = await memStore.openFlags(officeId);
+  assert.equal(flags.length, 1);
+  assert.deepEqual(flags[0]!.flaggedBy.sort(), ["pm", "strategist"]);
+  const edited = await mem.edit(officeId, setupNow, "ada", company.id, { body: "May 15" });
+  assert.equal(edited.version, 3);
+  const versions = (await admin.from("memory_versions").select("v, body").eq("item_id", company.id).order("v")).data!;
+  assert.deepEqual(versions.map((v) => v.body), ["March 1", "March 1"], "versions keep what came before");
+  assert.ok((await mem.read(officeId, setupNow, "pm", derived.id)).warnings.some((w) => /derived from has changed/.test(w)));
+  console.log("memory against Supabase: ok");
+
+  // Ada's chat with a card, meetings and minutes.
+  const data = supabaseOfficeData(db);
+  const card = { id: crypto.randomUUID(), type: "proposal" as const, ops: [{ op: "hire_agent" }], baseVersion: 2, readback: ["x"], summary: "Hire", state: "pending" as const };
+  await data.say(officeId, { role: "ada", content: "Here's the card", cards: [card], mode: "chat" });
+  assert.equal((await data.findCard(officeId, card.id))?.state, "pending");
+  await data.updateCard(officeId, card.id, { state: "applied", version: 3 });
+  assert.equal((await data.findCard(officeId, card.id))?.version, 3);
+  assert.equal((await data.history(officeId, 10)).length, 1);
+  const meeting = await data.saveMeeting(officeId, { title: "Scope", requestedBy: "pm", chair: "ada", attendees: ["pm"], agenda: ["a"], preRead: "p", state: "scheduled" });
+  await data.saveMeeting(officeId, { id: meeting.id, state: "live", threadId: "T-9" });
+  await data.saveMinutes(officeId, { meetingId: meeting.id, summary: "s", decisions: [], actionItems: [{ text: "t", owner: "pm", taskId: "K-1" }] }, [company.id]);
+  assert.equal((await data.minutes(officeId, meeting.id))?.actionItems[0]?.taskId, "K-1");
+  await data.raise(officeId, { id: "A-briefing-test", kind: "briefing", from: "ada", title: "Brief", body: "b" });
+  await data.triage(officeId, "A-briefing-test", 3, "FYI");
+  assert.equal((await data.inbox(officeId)).find((i) => i.id === "A-briefing-test")?.adaNote, "FYI");
+  console.log("Ada's data against Supabase: ok");
 } finally {
   await admin.auth.admin.deleteUser(id);
   const { count } = await admin.from("offices").select("id", { count: "exact", head: true }).eq("owner_id", id);

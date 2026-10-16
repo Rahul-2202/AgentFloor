@@ -1,3 +1,4 @@
+import type { LockTarget } from "@agentfloor/shared/governance";
 import { defaultSetup, DEFAULT_POLICY, type Budget, type OfficeSetup, type RoomSetup } from "@agentfloor/shared/setup";
 import type { AgentDef } from "@agentfloor/shared/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -47,7 +48,7 @@ export function supabaseSetupStore(db: SupabaseClient): SetupStore {
         db.from("agents").select("*").eq("office_id", officeId).order("created_at"),
         db.from("policies").select("settings").eq("office_id", officeId).eq("scope", "office").eq("scope_id", "").maybeSingle(),
       ]);
-      const settings = ((check(policy, "reading policy") as { settings?: object } | null)?.settings ?? {}) as { protocol?: object; budgets?: Budget[] };
+      const settings = ((check(policy, "reading policy") as { settings?: object } | null)?.settings ?? {}) as { protocol?: object; budgets?: Budget[]; locks?: LockTarget[] };
       return {
         version: office.config_version,
         pushed: office.config_pushed,
@@ -55,9 +56,21 @@ export function supabaseSetupStore(db: SupabaseClient): SetupStore {
           name: office.name,
           policy: { ...DEFAULT_POLICY, ...settings.protocol },
           budgets: settings.budgets ?? [],
+          locks: [...new Set<LockTarget>(["merge", ...(settings.locks ?? [])])],
           rooms: check(rooms, "reading rooms").map(
             (r): RoomSetup =>
-              strip({ id: r.id, name: r.name, head: r.head_id, purpose: r.purpose, responsibilities: r.responsibilities, dod: r.definition_of_done, slot: r.slot }),
+              strip({
+                id: r.id,
+                name: r.name,
+                head: r.head_id,
+                purpose: r.purpose,
+                responsibilities: r.responsibilities,
+                dod: r.definition_of_done,
+                slot: r.slot,
+                permissions: Object.keys(r.settings?.permissions ?? {}).length ? r.settings.permissions : undefined,
+                whenBlocked: r.settings?.whenBlocked,
+                publish: r.settings?.publish,
+              }),
           ),
           agents: check(agents, "reading agents").map(
             (a): AgentDef =>
@@ -71,6 +84,7 @@ export function supabaseSetupStore(db: SupabaseClient): SetupStore {
                 model: a.model,
                 effort: a.effort,
                 options: Object.keys(a.options ?? {}).length ? a.options : undefined,
+                permissions: Object.keys(a.permissions ?? {}).length ? a.permissions : undefined,
               }),
           ),
         },

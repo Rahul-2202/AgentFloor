@@ -34,6 +34,8 @@ export interface AgentContext {
   workdir: string;
   /** The workdir is a worktree of the office repo: the office's own files stay out of it. */
   inRepo?: boolean;
+  /** The agent's memory brief from the Control API (latest), for its memory file. */
+  brief?: () => string;
   /** Environment for the agent's process: office URL and token, PATH with `office`, keys. */
   env: Record<string, string>;
   /** The repo root, for paths to the MCP server and the `office` command. */

@@ -18,12 +18,16 @@ export interface Projection {
   /** Agent id → columns to update (status, activity, held_reason). */
   agents: Map<string, Row>;
   usage: Row[];
+  /** Audit entries for what agents and the office did (who, what, when, detail). */
+  audit: Row[];
 }
 
 const iso = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString() : null);
 
 export function project(officeId: string, events: OfficeEvent[], roomOf: (agent: string) => string | null): Projection {
-  const p: Projection = { threads: new Map(), messages: new Map(), delivered: new Map(), tasks: new Map(), inbox: new Map(), agents: new Map(), usage: [] };
+  const p: Projection = { threads: new Map(), messages: new Map(), delivered: new Map(), tasks: new Map(), inbox: new Map(), agents: new Map(), usage: [], audit: [] };
+  const audit = (ev: OfficeEvent, actor: string, action: string, target: string, detail: object = {}) =>
+    p.audit.push({ office_id: officeId, seq: ev.seq, actor, action, target, detail, created_at: iso(ev.at) });
   const agentRow = (id: string) => p.agents.get(id) ?? (p.agents.set(id, {}), p.agents.get(id)!);
 
   for (const ev of events) {
@@ -115,7 +119,6 @@ export function project(officeId: string, events: OfficeEvent[], roomOf: (agent:
           body: i.body,
           state: i.state,
           action: i.action ?? null,
-          priority: i.kind === "approval" ? 1 : 2,
           created_at: iso(i.createdAt),
           resolved_at: i.state === "resolved" ? iso(ev.at) : null,
         });
@@ -126,9 +129,29 @@ export function project(officeId: string, events: OfficeEvent[], roomOf: (agent:
         break;
       case "agent.held":
         Object.assign(agentRow(d.agent), { held_reason: d.reason });
+        audit(ev, "office", "agent.held", d.agent, { reason: d.reason });
         break;
       case "agent.released":
         Object.assign(agentRow(d.agent), { held_reason: null });
+        audit(ev, "office", "agent.released", d.agent);
+        break;
+      case "pr.opened":
+        audit(ev, `agent:${d.agent}`, "pr.opened", `#${d.number}`, { url: d.url, branch: d.branch, task: d.taskId });
+        break;
+      case "permission.asked":
+        audit(ev, `agent:${d.agent}`, d.firstUse ? "permission.first_use" : "permission.asked", d.permission, { detail: d.detail, inbox: d.inboxId });
+        break;
+      case "permission.answered":
+        audit(ev, "ceo", d.allow ? "permission.allowed" : "permission.refused", `${d.agent}:${d.permission}`, { inbox: d.inboxId });
+        break;
+      case "meeting.started":
+        audit(ev, "ceo", "meeting.started", d.topic, { thread: d.threadId, attendees: d.attendees });
+        break;
+      case "meeting.ended":
+        audit(ev, "ceo", "meeting.ended", d.threadId, {});
+        break;
+      case "config.applied":
+        audit(ev, "office", "setup.running", "", { added: d.added, removed: d.removed, changed: d.changed });
         break;
       case "model.call":
         p.usage.push({
