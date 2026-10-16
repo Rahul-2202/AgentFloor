@@ -1,4 +1,6 @@
 import { loadEnv } from "@agentfloor/shared/env";
+import { agentSdkBrain } from "./ada/brain.ts";
+import { supabaseOfficeData } from "./ada/data.ts";
 import { buildApp } from "./app.ts";
 import { makeVerifier } from "./auth.ts";
 import { supabaseBudgetStore } from "./budgets.ts";
@@ -40,7 +42,9 @@ const s = createServices({
     github: supabaseGitHubStore(db),
     memory: supabaseMemoryStore(db),
     conversations: supabaseConversationSource(db),
+    data: supabaseOfficeData(db),
   },
+  ada: config.ada ? { brain: agentSdkBrain({ token: config.ada.token, model: config.ada.model, effort: config.ada.effort }) } : null,
   github: config.github ? { app: new GitHubApp(config.github) } : null,
   machine: config.daytona
     ? {
@@ -65,6 +69,9 @@ const app = await buildApp({
   spend: s.stores.budgets,
   watchers: s.watchers,
   github: s.github,
+  ada: s.ada,
+  meetings: s.meetings,
+  memory: s.memory,
   inboxItem: async (officeId, id) => {
     const { data } = await db.from("inbox_items").select("id, from, kind").eq("office_id", officeId).eq("id", id).maybeSingle();
     return data;
@@ -85,9 +92,18 @@ const app = await buildApp({
 });
 await app.listen({ port: config.port, host: config.host });
 
-// Budgets also need checking when nothing happens: a new day releases agents held yesterday.
+// Every 10 minutes: budgets (a new day releases agents held yesterday), and the morning briefing.
+const briefed = new Map<string, string>();
 const budgetTimer = setInterval(() => {
-  for (const id of s.hub.connectedOffices()) void s.budgets.check(id).catch((err) => log(`budgets: ${err.message}`));
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  for (const id of s.hub.connectedOffices()) {
+    void s.budgets.check(id).catch((err) => log(`budgets: ${err.message}`));
+    if (s.ada && config.ada && now.getUTCHours() === config.ada.briefingHourUtc && briefed.get(id) !== day) {
+      briefed.set(id, day);
+      void s.ada.briefing(id, now).catch((err) => log(`briefing: ${err.message}`));
+    }
+  }
 }, 10 * 60_000);
 
 for (const sig of ["SIGTERM", "SIGINT"] as const) {

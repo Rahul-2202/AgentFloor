@@ -89,6 +89,7 @@ export function supabaseProjectionStore(db: SupabaseClient): ProjectionStore {
       if (p.usage.length) {
         ok(await db.from("usage_events").upsert(p.usage, { onConflict: "office_id,seq", ignoreDuplicates: true }), "usage");
       }
+      if (p.audit.length) ok(await db.from("audit_log").upsert(p.audit, { onConflict: "office_id,seq", ignoreDuplicates: true }), "audit");
       ok(await db.from("offices").update({ projected_seq: upToSeq }).eq("id", officeId), "projected seq");
     },
   };
@@ -96,7 +97,7 @@ export function supabaseProjectionStore(db: SupabaseClient): ProjectionStore {
 
 /** In-memory projection store for tests: tables as maps. */
 export function memoryProjectionStore(events: () => OfficeEvent[], rooms: Record<string, string> = {}) {
-  const tables = { threads: new Map<string, any>(), messages: new Map<string, any>(), tasks: new Map<string, any>(), inbox: new Map<string, any>(), agents: new Map<string, any>(), usage: new Map<number, any>() };
+  const tables = { threads: new Map<string, any>(), messages: new Map<string, any>(), tasks: new Map<string, any>(), inbox: new Map<string, any>(), agents: new Map<string, any>(), usage: new Map<number, any>(), audit: [] as any[] };
   let projected = 0;
   const store: ProjectionStore = {
     async pending(_id, limit) {
@@ -113,6 +114,7 @@ export function memoryProjectionStore(events: () => OfficeEvent[], rooms: Record
       for (const [k, v] of p.inbox) tables.inbox.set(k, v);
       for (const [k, v] of p.agents) tables.agents.set(k, { ...tables.agents.get(k), ...v });
       for (const u of p.usage) if (!tables.usage.has(u.seq as number)) tables.usage.set(u.seq as number, u);
+      for (const a of p.audit) if (!tables.audit.some((x) => x.seq === a.seq)) tables.audit.push(a);
       projected = upTo;
     },
   };

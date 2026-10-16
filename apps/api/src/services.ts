@@ -3,6 +3,10 @@
  * server (with Supabase and Daytona) and by tests (with memory stores).
  */
 import type { Verify } from "./auth.ts";
+import { Ada } from "./ada/ada.ts";
+import type { AdaBrain } from "./ada/brain.ts";
+import type { OfficeData } from "./ada/data.ts";
+import { Meetings } from "./ada/meetings.ts";
 import { Budgets, type BudgetStore } from "./budgets.ts";
 import { OfficeMemory, type ConversationSource } from "./memory/office.ts";
 import { MemoryService } from "./memory/service.ts";
@@ -29,6 +33,7 @@ export interface ServiceStores {
   github?: GitHubStore;
   memory?: MemoryStore;
   conversations?: ConversationSource;
+  data?: OfficeData;
 }
 
 export interface MachineConfig extends Omit<MachineOptions, "cloud" | "machines" | "link" | "connectedSince"> {
@@ -41,6 +46,8 @@ export function createServices(o: {
   machine: MachineConfig | null;
   /** The GitHub App; null until it's configured. */
   github?: { app: GitHubApp; cloneUrlOf?: (fullName: string) => string } | null;
+  /** Ada's model; null when no Claude credential is configured. */
+  ada?: { brain: AdaBrain; triageDelayMs?: number } | null;
   log?: (msg: string) => void;
 }) {
   const log = o.log ?? (() => {});
@@ -66,6 +73,23 @@ export function createServices(o: {
   const officeMemory =
     memory && o.stores.conversations ? new OfficeMemory({ memory, setups: o.stores.setups, hub, source: o.stores.conversations }) : null;
 
+  const ada =
+    o.ada && memory && o.stores.data ? new Ada({ brain: o.ada.brain, setup, memory, hub, data: o.stores.data, spend: o.stores.budgets }) : null;
+  const meetings = ada && memory && o.stores.data ? new Meetings({ ada, data: o.stores.data, hub, memory, setup }) : null;
+  // New inbox items get Ada's triage, a little after they arrive (they come in bursts).
+  const triageTimers = new Map<string, NodeJS.Timeout>();
+  const triageSoon = (id: string) => {
+    if (!ada) return;
+    clearTimeout(triageTimers.get(id));
+    triageTimers.set(
+      id,
+      setTimeout(() => {
+        triageTimers.delete(id);
+        void ada.triage(id).catch((err) => log(`triage: ${(err as Error).message}`));
+      }, o.ada?.triageDelayMs ?? 20_000),
+    );
+  };
+
   // What the office asks the API for: memory, or GitHub (tokens, PRs).
   hub.onRequest = async (id, name, args) => {
     if (name === "memory") {
@@ -89,12 +113,13 @@ export function createServices(o: {
     await projector.catchUp(id);
     // Memory reads the projected tables, so it runs after them.
     await officeMemory?.onEvents(id, events).catch(warn("memory"));
+    if (events.some((e) => e.type === "inbox.added")) triageSoon(id);
   };
   projector.onUsage = (id) => void budgets.check(id).catch(warn("budgets"));
   hub.onLive = (id, ev) => watchers.broadcast(id, ev);
   if (machines) hub.onActivity = (id) => void machines.activity(id).catch(warn("keep-awake"));
 
-  return { hub, setup, projector, budgets, machines, watchers, github, memory, officeMemory, stores: o.stores };
+  return { hub, setup, projector, budgets, machines, watchers, github, memory, officeMemory, ada, meetings, triageSoon, stores: o.stores };
 }
 
 export type Services = ReturnType<typeof createServices>;

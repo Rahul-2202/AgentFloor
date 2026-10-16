@@ -3,7 +3,10 @@ import websocket from "@fastify/websocket";
 import { LINK_PATH } from "@agentfloor/shared/link";
 import Fastify, { type FastifyRequest } from "fastify";
 import { AuthError, bearer, type User, type Verify } from "./auth.ts";
+import type { Ada } from "./ada/ada.ts";
+import { MeetingError, type Meetings } from "./ada/meetings.ts";
 import { startOfDayUtc, type Budgets, type BudgetStore } from "./budgets.ts";
+import { MemoryError, type MemoryService } from "./memory/service.ts";
 import { GitHubError } from "./github/app.ts";
 import { GitHubUserError, type GitHubService } from "./github/service.ts";
 import { LinkError, type OfficeHub } from "./link/hub.ts";
@@ -25,6 +28,9 @@ export interface Deps {
   spend?: BudgetStore;
   watchers?: Watchers;
   github?: GitHubService | null;
+  ada?: Ada | null;
+  meetings?: Meetings | null;
+  memory?: MemoryService | null;
   /** An inbox item's sender, for approvals (who asked for the merge). */
   inboxItem?: (officeId: string, id: string) => Promise<{ id: string; from: string; kind: string } | null>;
   /** Records something in the office's audit log (webhooks). */
@@ -38,7 +44,7 @@ export interface Deps {
 }
 
 /** Office calls the browser can't make through /office/call: setup goes through the policy engine; holds are the API's. */
-const BLOCKED_CALLS = new Set(["ceo_configure_agent", "ceo_hold_agent", "ceo_release_agent"]);
+const BLOCKED_CALLS = new Set(["ceo_configure_agent", "ceo_hold_agent", "ceo_release_agent", "ceo_start_meeting", "ceo_end_meeting"]);
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -309,6 +315,154 @@ export async function buildApp(deps: Deps) {
         return await deps.github!.requestChanges(id, Number(req.params.n), req.body.comment, item ?? undefined);
       } catch (err) {
         return ghError(reply, err);
+      }
+    });
+
+    /* --------------------------------------------------------------- Ada */
+
+    const userError = (reply: any, err: unknown) => {
+      if (err instanceof PolicyError) return reply.code(422).send({ error: err.message, problems: err.problems });
+      if (err instanceof StaleSetupError) return reply.code(409).send({ error: err.message });
+      if (err instanceof MemoryError || err instanceof MeetingError) return reply.code(400).send({ error: err.message });
+      if (err instanceof LinkError) return reply.code(err.code === "office_offline" ? 503 : 400).send({ error: err.message });
+      throw err;
+    };
+    const needAda = (reply: any) => (deps.ada ? null : reply.code(503).send({ error: "Ada isn't set up on this server yet." }));
+
+    /** Talk to Ada. Her reply streams back as server-sent events: text, cards, then done. */
+    authed.post<{ Body: { message?: string } }>("/office/ada/chat", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (needAda(reply)) return;
+      const origin = req.headers.origin;
+      reply.hijack();
+      reply.raw.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+        connection: "keep-alive",
+        ...(origin && deps.webOrigins.includes(origin) ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+      });
+      const send = (e: object) => reply.raw.write(`data: ${JSON.stringify(e)}\n\n`);
+      try {
+        await deps.ada!.chat(id, String(req.body?.message ?? ""), send);
+      } catch (err) {
+        send({ type: "error", message: (err as Error).message });
+      }
+      reply.raw.end();
+    });
+
+    authed.post<{ Params: { card: string } }>("/office/ada/cards/:card/confirm", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (needAda(reply)) return;
+      try {
+        const r = await deps.ada!.confirm(id, req.params.card);
+        void deps.budgets?.check(id).catch(() => {});
+        return r;
+      } catch (err) {
+        return userError(reply, err);
+      }
+    });
+
+    authed.post<{ Params: { card: string } }>("/office/ada/cards/:card/dismiss", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id || !deps.ada) return reply.code(404).send({ error: "no office yet" });
+      await deps.ada.dismiss(id, req.params.card);
+      return { dismissed: true };
+    });
+
+    /** Today's briefing, now (it also arrives every morning). */
+    authed.post("/office/ada/briefing", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (needAda(reply)) return;
+      return { briefing: await deps.ada!.briefing(id) };
+    });
+
+    /* ------------------------------------------------------------ meetings */
+
+    authed.get("/office/meetings", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id || !deps.meetings) return reply.code(404).send({ error: "no office yet" });
+      return { meetings: await deps.meetings.list(id) };
+    });
+
+    authed.post<{ Body: { title?: string; attendees?: string[]; agenda?: string[]; chair?: "ada" | "ceo"; preRead?: string } }>("/office/meetings", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id || !deps.meetings) return reply.code(404).send({ error: "no office yet" });
+      const b = req.body ?? {};
+      if (!b.title?.trim() || !b.attendees?.length) return reply.code(400).send({ error: "A meeting needs a title and attendees." });
+      return { meeting: await deps.meetings.schedule(id, { title: b.title, attendees: b.attendees, agenda: b.agenda ?? [], chair: b.chair, preRead: b.preRead }) };
+    });
+
+    for (const action of ["start", "end"] as const) {
+      authed.post<{ Params: { m: string } }>(`/office/meetings/:m/${action}`, async (req, reply) => {
+        const id = await officeOf(req);
+        if (!id || !deps.meetings) return reply.code(404).send({ error: "no office yet" });
+        try {
+          return action === "start" ? { meeting: await deps.meetings.start(id, req.params.m) } : await deps.meetings.end(id, req.params.m);
+        } catch (err) {
+          return userError(reply, err);
+        }
+      });
+    }
+
+    authed.get<{ Params: { m: string } }>("/office/meetings/:m/minutes", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id || !deps.meetings) return reply.code(404).send({ error: "no office yet" });
+      return { minutes: await deps.meetings.minutes(id, req.params.m) };
+    });
+
+    /* -------------------------------------------------------------- memory */
+
+    const memoryCall = (fn: (officeId: string, setup: any) => Promise<unknown>) => async (req: FastifyRequest, reply: any) => {
+      const id = await officeOf(req);
+      if (!id || !deps.memory || !deps.setup) return reply.code(404).send({ error: "no office yet" });
+      try {
+        return { result: await fn(id, (await deps.setup.get(id)).setup) };
+      } catch (err) {
+        return userError(reply, err);
+      }
+    };
+
+    /** The CEO writes or edits anything the company remembers. */
+    authed.post<{ Body: any }>("/office/memory", (req, reply) =>
+      memoryCall((o, setup) =>
+        deps.memory!.write(o, setup, "ceo", {
+          layer: (req.body as any)?.layer,
+          scopeId: (req.body as any)?.scopeId,
+          type: String((req.body as any)?.type ?? "fact"),
+          title: String((req.body as any)?.title ?? ""),
+          body: String((req.body as any)?.body ?? ""),
+          tags: (req.body as any)?.tags,
+          rooms: (req.body as any)?.rooms,
+          replaces: (req.body as any)?.replaces,
+        }),
+      )(req, reply),
+    );
+    authed.patch<{ Params: { id: string }; Body: any }>("/office/memory/:id", (req, reply) =>
+      memoryCall((o, setup) => deps.memory!.edit(o, setup, "ceo", req.params.id, { title: (req.body as any)?.title, body: (req.body as any)?.body, tags: (req.body as any)?.tags }))(req, reply),
+    );
+    authed.post<{ Params: { id: string }; Body: any }>("/office/memory/:id/flag", (req, reply) =>
+      memoryCall((o, setup) => deps.memory!.flag(o, setup, "ceo", req.params.id, String((req.body as any)?.reason ?? "")))(req, reply),
+    );
+    authed.post<{ Params: { id: string } }>("/office/memory/:id/accept", (req, reply) =>
+      memoryCall((o, setup) => deps.memory!.accept(o, setup, "ceo", req.params.id))(req, reply),
+    );
+    authed.post<{ Params: { id: string }; Body: any }>("/office/memory/:id/reject", (req, reply) =>
+      memoryCall((o, setup) => deps.memory!.reject(o, setup, "ceo", req.params.id, String((req.body as any)?.why ?? "")))(req, reply),
+    );
+
+    /* --------------------------------------------------------- permissions */
+
+    /** The CEO answers an agent's permission ask (once; for a first use, from now on). */
+    authed.post<{ Params: { inbox: string }; Body: { allow?: boolean; note?: string } }>("/office/permissions/:inbox", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      try {
+        return { result: await deps.hub.call(id, "ceo_answer_permission", { inbox_id: req.params.inbox, allow: !!req.body?.allow, note: req.body?.note }) };
+      } catch (err) {
+        return userError(reply, err);
       }
     });
 

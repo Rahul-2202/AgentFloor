@@ -144,3 +144,7 @@ begin
 end $$;
 
 alter publication supabase_realtime add table public.ada_messages, public.memory_flags, public.audit_log;
+
+-- Audit entries from office events carry the event's seq, so projecting twice adds nothing.
+alter table public.audit_log add column seq bigint;
+create unique index audit_log_office_seq on public.audit_log (office_id, seq) where seq is not null;
