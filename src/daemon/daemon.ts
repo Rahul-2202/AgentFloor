@@ -61,11 +61,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
       // The shell's ANTHROPIC_BASE_URL is ignored; agents use the office's choice.
       // Variables from a Claude Code session the daemon was started from would
       // make the agents' own Claude Code think it's nested, so they're dropped too.
-      // CLAUDE_CODE_OAUTH_TOKEN is kept: it's the Claude login where there's no keychain (the sandbox).
-      if (v === undefined || k === "ANTHROPIC_BASE_URL" || k === "CLAUDECODE" || k.startsWith("CLAUDE_AGENT_")) continue;
-      if (k.startsWith("CLAUDE_CODE_") && k !== "CLAUDE_CODE_OAUTH_TOKEN") continue;
+      if (v === undefined || k === "ANTHROPIC_BASE_URL" || k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k.startsWith("CLAUDE_AGENT_")) continue;
       env[k] = v;
     }
+    // Where there's no keychain (the cloud sandbox), the Claude login comes from `claude setup-token`.
+    if (process.env.AGENTFLOOR_CLAUDE_TOKEN) env.CLAUDE_CODE_OAUTH_TOKEN = process.env.AGENTFLOOR_CLAUDE_TOKEN;
     if (process.env.AGENTFLOOR_ANTHROPIC_BASE_URL) env.ANTHROPIC_BASE_URL = process.env.AGENTFLOOR_ANTHROPIC_BASE_URL;
     env.AGENTFLOOR_URL = url;
     env.AGENTFLOOR_AGENT = agentId;

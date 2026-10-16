@@ -6,7 +6,8 @@
     "daemon": "node --disable-warning=ExperimentalWarning src/daemon/main.ts",
     "office": "node --disable-warning=ExperimentalWarning src/cli/office.ts",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sandbox": "node --disable-warning=ExperimentalWarning scripts/sandbox.ts"
   },
   "type": "module",
   "dependencies": {

@@ -86,6 +86,21 @@ Then start the CLI in that shell, with the office MCP server
 (`node --disable-warning=ExperimentalWarning <repo>/src/mcp/server.ts`) added to
 its MCP config, or just tell it to use the `office` command.
 
+## Run it in the cloud (Daytona)
+
+Put `DAYTONA_API_KEY` and `AGENTFLOOR_CLAUDE_TOKEN` (from `claude setup-token`)
+in `.env`, then:
+
+```bash
+npm run sandbox up       # create or wake the sandbox, push this repo, start the daemon
+npm run sandbox status   # console link + daemon log
+npm run sandbox down     # stop it (stops on its own after 30 idle minutes)
+```
+
+The sandbox is private: the console link opens only for your Daytona
+organization. Only `AGENTFLOOR_CLAUDE_TOKEN` and `GEMINI_API_KEY` are copied
+from your `.env`.
+
 ## Layout
 
 | Path | What |
@@ -105,4 +120,4 @@ Tracked in Linear, project "AgentFloor Prototype":
 
 - Phase 3: model gateway (cost, state, mid-task delivery for runtimes without hooks)
 - Phase 4 + 5: conformance grid across runtimes, then a real shared-repo scenario
-- Phase 6: run the office in a cloud sandbox (on hold: choosing a sandbox)
+- Phase 6: run the office in a cloud sandbox (Daytona, see below)
