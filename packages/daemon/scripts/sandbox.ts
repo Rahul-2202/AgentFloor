@@ -9,13 +9,17 @@
  * Needs DAYTONA_API_KEY in .env. Claude Code agents need AGENTFLOOR_CLAUDE_TOKEN
  * (run `claude setup-token` once). The sandbox is private: the console link only
  * opens for members of your Daytona organization, and it stops itself after
- * 30 idle minutes so the free credits aren't burned overnight.
+ * 15 idle minutes so the credits aren't burned overnight.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { Daytona, type Sandbox } from "@daytona/sdk";
+import { loadEnv } from "../src/env.ts";
 
-if (existsSync(".env")) process.loadEnvFile(".env");
+loadEnv();
+// The monorepo root: the whole repo is uploaded, and only the daemon workspace is installed.
+const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 
 const NAME = "agentfloor-office";
 const PORT = 4300;
@@ -57,7 +61,7 @@ async function up() {
         resources: { cpu: 2, memory: 4, disk: 10 },
         labels: { app: "agentfloor" },
         public: false,
-        autoStopInterval: 30,
+        autoStopInterval: 15,
       },
       { timeout: 900, onSnapshotCreateLogs: (chunk) => process.stdout.write(chunk) },
     );
@@ -70,17 +74,17 @@ async function up() {
   const app = `${home}/agentfloor`;
 
   // Tracked and new files, minus anything git ignores (node_modules, data, .env).
-  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { encoding: "utf8" })
+  const files = execFileSync("git", ["ls-files", "-co", "--exclude-standard"], { encoding: "utf8", cwd: ROOT })
     .split("\n")
-    .filter((f) => f && existsSync(f) && !f.startsWith(".claude/"));
+    .filter((f) => f && existsSync(join(ROOT, f)) && !f.startsWith(".claude/"));
   const env = FORWARD.filter((k) => process.env[k]).map((k) => `${k}=${process.env[k]}`).join("\n");
   log(`uploading ${files.length} files`);
   await sandbox.fs.uploadFiles([
-    ...files.map((f) => ({ source: f, destination: `${app}/${f}` })),
+    ...files.map((f) => ({ source: join(ROOT, f), destination: `${app}/${f}` })),
     { source: Buffer.from(`${env}\nAGENTFLOOR_PORT=${PORT}\n`), destination: `${app}/.env` },
   ]);
 
-  await run(sandbox, "npm ci", "npm ci --no-audit --no-fund", app);
+  await run(sandbox, "npm ci", "npm ci -w @agentfloor/daemon --no-audit --no-fund", app);
   await run(sandbox, "installing Claude Code", // The daemon puts ~/.local/bin on the agents' PATH.
     "npm install -g --prefix ~/.local --no-audit --no-fund @anthropic-ai/claude-code");
   await run(sandbox, "git identity for agent workdirs", `git config --global user.name AgentFloor && git config --global user.email agents@agentfloor.local`);
@@ -90,7 +94,7 @@ async function up() {
   await sandbox.process.executeCommand("pkill -f src/daemon/main.ts || true");
   await sandbox.process.createSession(SESSION);
   await sandbox.process.executeSessionCommand(SESSION, {
-    command: `cd ${app} && npm run daemon -- --host 0.0.0.0 > office.log 2>&1`,
+    command: `cd ${app} && npm run daemon -w @agentfloor/daemon -- --host 0.0.0.0 > office.log 2>&1`,
     runAsync: true,
   });
   log("waiting for the daemon");
