@@ -15,6 +15,12 @@ export interface RoomDef {
   name: string;
   /** Agent id of the room's head. */
   head: string;
+  /** Room-wide permission levels (agents can override). */
+  permissions?: Partial<Record<import("./governance.ts").Permission, import("./governance.ts").Level>>;
+  /** What agents do when they're blocked. */
+  whenBlocked?: import("./governance.ts").WhenBlocked;
+  /** PRs as drafts (default) or ready for review. */
+  publish?: import("./governance.ts").PublishMode;
 }
 
 export interface AgentDef {
@@ -34,6 +40,8 @@ export interface AgentDef {
   lessons?: string[];
   /** Runtime-specific settings (for "scripted": its script). */
   options?: Record<string, unknown>;
+  /** This agent's own permission levels, over its room's. */
+  permissions?: Partial<Record<import("./governance.ts").Permission, import("./governance.ts").Level>>;
 }
 
 /** What the office shows for an agent, derived from its runtime. */
@@ -70,9 +78,9 @@ export interface RepoRef {
 }
 
 export type Urgency = "normal" | "urgent" | "stop";
-export type MsgType = "ask" | "answer" | "inform" | "request_work" | "huddle" | "stop";
+export type MsgType = "ask" | "answer" | "inform" | "request_work" | "huddle" | "meeting" | "stop";
 
-export type ThreadKind = "message" | "huddle";
+export type ThreadKind = "message" | "huddle" | "meeting";
 export type ThreadState = "open" | "resolved" | "escalated";
 
 export interface Thread {
@@ -106,6 +114,14 @@ export interface Thread {
  * - "turn_end": when the recipient's current turn ends (everything else)
  */
 export type DeliveryPoint = "now" | "tool" | "turn_end";
+
+export type InboxAction =
+  | { type: "merge"; pr: number; url: string; repo: string }
+  /** An agent hit an "ask" permission, or used a powerful one for the first time. */
+  | { type: "permission"; agent: string; permission: string; detail: string; firstUse: boolean }
+  /** An agent asks for a permission to change (through Ada to the CEO). */
+  | { type: "permission_request"; agent: string; permission: string; why: string }
+  | { type: "meeting"; topic: string; why: string; attendees: string[]; options?: string[] };
 
 export interface Message {
   id: string;
@@ -155,15 +171,15 @@ export interface Task {
 
 export interface InboxItem {
   id: string;
-  kind: "question" | "escalation" | "budget" | "approval";
+  kind: "question" | "escalation" | "budget" | "approval" | "permission" | "permission_request" | "meeting_request" | "briefing";
   from: string;
   threadId: string | null;
   title: string;
   body: string;
   state: "open" | "resolved";
   createdAt: number;
-  /** What approving does, for approvals (e.g. merge a PR). */
-  action?: { type: "merge"; pr: number; url: string; repo: string } | null;
+  /** What approving does. */
+  action?: InboxAction | null;
 }
 
 /** The parts of an agent the CEO can change from the console. */

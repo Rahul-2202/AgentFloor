@@ -1,3 +1,4 @@
+import { WHEN_BLOCKED } from "@agentfloor/shared/governance";
 import type { AgentDef, OfficeConfig, RepoRef } from "../core/types.ts";
 
 /**
@@ -5,7 +6,7 @@ import type { AgentDef, OfficeConfig, RepoRef } from "../core/types.ts";
  * The memory file (CLAUDE.md, .junie/guidelines.md, GEMINI.md) holds who it is
  * and what it knows; the system prompt holds how to work in the office.
  */
-export function memoryFile(agent: AgentDef, config: OfficeConfig): string {
+export function memoryFile(agent: AgentDef, config: OfficeConfig, brief = ""): string {
   const room = config.rooms.find((r) => r.id === agent.room)!;
   const head = config.agents.find((a) => a.id === room.head)!;
   const others = config.agents.filter((a) => a.id !== agent.id);
@@ -22,9 +23,12 @@ export function memoryFile(agent: AgentDef, config: OfficeConfig): string {
     "",
     ...others.map((a) => `- \`${a.id}\` ${a.name}, ${config.rooms.find((r) => r.id === a.room)?.name}${a.role === "head" ? " (head)" : ""}: ${a.title}`),
     "",
-    "## What you've learned",
+    "## When you're blocked",
     "",
-    ...(agent.lessons?.length ? agent.lessons.map((l) => `- ${l}`) : ["- Nothing yet."]),
+    `Your room's rule: ${WHEN_BLOCKED[room.whenBlocked ?? "park_and_switch"]}.`,
+    "",
+    ...(agent.lessons?.length ? ["## Starting lessons", "", ...agent.lessons.map((l) => `- ${l}`), ""] : []),
+    brief || "## What you know (office memory)\n\nNothing yet. Save durable lessons with memory_write.",
     "",
   ].join("\n");
 }

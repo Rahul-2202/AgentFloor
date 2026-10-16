@@ -95,6 +95,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     env: { AGENTFLOOR_URL: url, AGENTFLOOR_TOKEN: auth.tokenFor(OFFICE), PATH: `${join(ROOT, "bin")}:${process.env.PATH ?? ""}` },
   });
   office.hooks.push = (agent) => repo.push(agent);
+  office.hooks.rootsOf = (agent) => {
+    const home = resolve(opts.dataDir, "agents", agent);
+    return { home, workdir: inRepo ? repo.worktreeOf(agent) : join(home, "work") };
+  };
   const useRepo = async (): Promise<boolean> => {
     if (!config.repo) return false;
     try {
@@ -119,6 +123,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
       home: dir,
       workdir: inRepo ? repo.worktreeOf(agent.id) : join(dir, "work"),
       inRepo,
+      brief: () => office.briefOf(agent.id),
       env: envFor(agent.id),
       root: ROOT,
       log: (line) => log(`[${agent.id}] ${line}`),

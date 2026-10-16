@@ -52,6 +52,12 @@ function need(p: Parsed, n: number, usage: string): void {
 const one = (p: Parsed, f: string) => p.flags.get(f)?.[0];
 const rest = (p: Parsed, from: number) => p.pos.slice(from).join(" ");
 
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const c of process.stdin) chunks.push(c as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...args] = argv;
   if (!cmd || cmd === "help" || cmd === "--help") {
@@ -134,6 +140,25 @@ async function main(argv: string[]): Promise<void> {
           process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: due.text } }) + "\n");
         }
       } catch {}
+      return;
+    }
+    case "pretool": {
+      // Claude Code PreToolUse hook: refuse what the agent isn't allowed to do (the reason goes back to the
+      // agent). The office's own tools are always fine. If the office can't be asked, refuse rather than guess.
+      let ev: { tool_name?: string; tool_input?: Record<string, unknown>; cwd?: string } = {};
+      try {
+        ev = JSON.parse(await readStdin());
+      } catch {}
+      if (!ev.tool_name || ev.tool_name.startsWith("mcp__office")) return;
+      let decision: { allow: boolean; reason?: string };
+      try {
+        decision = await office.call<{ allow: boolean; reason?: string }>("permission_check", { tool: ev.tool_name, input: ev.tool_input ?? {}, cwd: ev.cwd });
+      } catch (err) {
+        decision = { allow: false, reason: `Couldn't check this with the office (${(err as Error).message}). Try again in a moment.` };
+      }
+      if (!decision.allow) {
+        process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: decision.reason } }) + "\n");
+      }
       return;
     }
     case "git-credential": {

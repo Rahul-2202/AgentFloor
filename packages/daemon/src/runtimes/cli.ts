@@ -80,6 +80,8 @@ class CliRuntime implements AgentRuntime {
   }
 
   async turn(input: string): Promise<void> {
+    // Rewrite the memory file and settings first: memory and permissions may have changed since the last turn.
+    this.spec.prepare(this.ctx);
     const resumed = this.session();
     if (await this.run(input, resumed)) return;
     if (this.interrupted) return;

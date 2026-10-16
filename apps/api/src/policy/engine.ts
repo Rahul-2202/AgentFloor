@@ -6,6 +6,18 @@
  * is exactly what changes. Ada can propose but never applies by herself.
  */
 import { CATALOG } from "@agentfloor/shared/catalog";
+import {
+  ALWAYS_LOCKED,
+  LEVELS,
+  LOCK_TARGETS,
+  PERMISSIONS,
+  WHEN_BLOCKED,
+  type Level,
+  type LockTarget,
+  type Permission,
+  type PublishMode,
+  type WhenBlocked,
+} from "@agentfloor/shared/governance";
 import type { Budget, OfficeSetup, RoomSetup } from "@agentfloor/shared/setup";
 import type { AgentDef, Policy } from "@agentfloor/shared/types";
 
@@ -34,10 +46,21 @@ export type SetupOp =
   | { op: "set_policy"; policy: Partial<Policy> }
   | ({ op: "set_budget" } & Budget)
   /** Restores a whole earlier setup (rollback). */
-  | { op: "restore"; setup: OfficeSetup; version: number };
+  | { op: "restore"; setup: OfficeSetup; version: number }
+  /** A whole new office (Ada's onboarding): rooms, agents, budgets and rules in one go. */
+  | { op: "replace_setup"; setup: Omit<OfficeSetup, "locks" | "policy"> & Partial<Pick<OfficeSetup, "locks" | "policy">> }
+  | { op: "set_permission"; scope: "room" | "agent"; id: string; permission: Permission; level: Level | null }
+  | { op: "set_when_blocked"; room: string; policy: WhenBlocked }
+  | { op: "set_publish"; room: string; mode: PublishMode }
+  | { op: "lock"; target: LockTarget }
+  /** CEO only, from the UI. */
+  | { op: "unlock"; target: LockTarget };
+
+/** Who's asking: the CEO (UI) or Ada (chat). Ada has the CEO's permissions, minus anything locked. */
+export type Actor = "ceo" | "ada";
 
 export interface Change {
-  kind: "office" | "room" | "agent" | "policy" | "budget";
+  kind: "office" | "room" | "agent" | "policy" | "budget" | "lock";
   action: "add" | "remove" | "change";
   id: string;
   field?: string;
@@ -61,12 +84,14 @@ export class PolicyError extends Error {
 }
 
 /** Works out what a set of operations would do. Throws PolicyError with every problem found. */
-export function propose(current: OfficeSetup, ops: SetupOp[]): Proposal {
+export function propose(current: OfficeSetup, ops: SetupOp[], actor: Actor = "ceo"): Proposal {
   if (!ops.length) throw new PolicyError(["Nothing to change."]);
+  current = { ...current, locks: current.locks ?? [...ALWAYS_LOCKED] };
   const next = structuredClone(current);
   const problems: string[] = [];
   for (const op of ops) {
     try {
+      if (op.op === "unlock" && actor !== "ceo") throw new Error("Only you can unlock a rule, in Rules and settings.");
       applyOp(next, op);
     } catch (err) {
       problems.push((err as Error).message);
@@ -76,6 +101,11 @@ export function propose(current: OfficeSetup, ops: SetupOp[]): Proposal {
   if (problems.length) throw new PolicyError(problems);
   const diff = diffSetups(current, next);
   if (!diff.length) throw new PolicyError(["That's already how the office is set up."]);
+  // Locked settings can't be changed from chat.
+  if (actor === "ada") {
+    const locked = [...new Set(diff.map(lockTargetOf).filter((t): t is LockTarget => !!t && current.locks.includes(t)))];
+    if (locked.length) throw new PolicyError(locked.map((t) => `That's locked: ${LOCK_TARGETS[t].toLowerCase()}. Only the CEO can change it, in Rules and settings.`));
+  }
   const restoring = ops.find((o) => o.op === "restore") as Extract<SetupOp, { op: "restore" }> | undefined;
   const readback = renderReadback(current, next, diff);
   const summary = restoring ? `Restore the setup from version ${restoring.version}` : readback[0]!;
@@ -192,8 +222,70 @@ function applyOp(s: OfficeSetup, op: SetupOp): void {
 
     case "restore":
       Object.assign(s, structuredClone(op.setup));
+      s.locks ??= [...ALWAYS_LOCKED];
+      return;
+
+    case "replace_setup": {
+      const n = structuredClone(op.setup);
+      if (n.rooms.length > MAX_ROOMS) throw new Error(`An office has at most ${MAX_ROOMS} rooms in v1.`);
+      n.rooms.forEach((r, i) => (r.slot ??= i + 1));
+      for (const a of n.agents) {
+        a.runtime ||= "claude-code";
+        a.title ??= "";
+        setRuntime(a, { runtime: a.runtime, model: a.model, effort: a.effort });
+      }
+      s.name = need(n.name, "The office needs a name.");
+      s.rooms = n.rooms;
+      s.agents = n.agents;
+      s.budgets = n.budgets ?? s.budgets;
+      if (n.policy) Object.assign(s.policy, n.policy);
+      s.locks = [...new Set([...ALWAYS_LOCKED, ...(n.locks ?? s.locks ?? [])])];
+      return;
+    }
+
+    case "set_permission": {
+      if (!PERMISSIONS.some((p) => p.id === op.permission)) throw new Error(`There's no permission "${op.permission}".`);
+      if (op.level !== null && !LEVELS.includes(op.level)) throw new Error(`A permission is free, ask or never.`);
+      const target = op.scope === "room" ? findRoom(s, op.id) : findAgent(s, op.id);
+      const perms = { ...(target.permissions ?? {}) };
+      if (op.level === null) delete perms[op.permission];
+      else perms[op.permission] = op.level;
+      target.permissions = Object.keys(perms).length ? perms : undefined;
+      if (!target.permissions) delete target.permissions;
+      return;
+    }
+
+    case "set_when_blocked":
+      if (!(op.policy in WHEN_BLOCKED)) throw new Error(`When blocked is one of: ${Object.keys(WHEN_BLOCKED).join(", ")}.`);
+      findRoom(s, op.room).whenBlocked = op.policy;
+      return;
+
+    case "set_publish":
+      if (op.mode !== "drafts" && op.mode !== "direct") throw new Error(`Publishing is "drafts" or "direct".`);
+      findRoom(s, op.room).publish = op.mode;
+      return;
+
+    case "lock":
+      if (!(op.target in LOCK_TARGETS)) throw new Error(`There's no rule "${op.target}" to lock.`);
+      s.locks = [...new Set([...(s.locks ?? []), op.target])];
+      return;
+
+    case "unlock":
+      if (ALWAYS_LOCKED.includes(op.target)) throw new Error(`"${LOCK_TARGETS[op.target]}" is always locked.`);
+      s.locks = (s.locks ?? []).filter((t) => t !== op.target);
       return;
   }
+}
+
+/** Which locked setting a change touches, if any. */
+function lockTargetOf(c: Change): LockTarget | null {
+  if (c.kind === "budget") return "budgets";
+  if (c.kind === "policy") return "protocol";
+  if (c.kind === "lock") return c.action === "remove" ? (c.id as LockTarget) : null;
+  if (c.field === "permissions") return "permissions";
+  if (c.field === "whenBlocked") return "when_blocked";
+  if (c.field === "publish") return "publish";
+  return null;
 }
 
 function newAgent(id: string, f: AgentFields & { name: string; title: string }, room: string, role: "head" | "member"): AgentDef {
@@ -233,8 +325,9 @@ function validate(s: OfficeSetup): string[] {
 
 /* ---------------------------------------------------------------- diff */
 
-const ROOM_FIELDS = ["name", "head", "purpose", "responsibilities", "dod"] as const;
-const AGENT_FIELDS = ["name", "title", "room", "role", "runtime", "model", "effort"] as const;
+const ROOM_FIELDS = ["name", "head", "purpose", "responsibilities", "dod", "permissions", "whenBlocked", "publish"] as const;
+const AGENT_FIELDS = ["name", "title", "room", "role", "runtime", "model", "effort", "permissions"] as const;
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 export function diffSetups(a: OfficeSetup, b: OfficeSetup): Change[] {
   const out: Change[] = [];
@@ -252,7 +345,7 @@ export function diffSetups(a: OfficeSetup, b: OfficeSetup): Change[] {
         for (const f of fields) {
           const from = (old as unknown as Record<string, unknown>)[f] ?? null;
           const to = (x as unknown as Record<string, unknown>)[f] ?? null;
-          if (from !== to) out.push({ kind, action: "change", id, field: f, from, to });
+          if (!same(from, to)) out.push({ kind, action: "change", id, field: f, from, to });
         }
     }
     for (const [id, x] of before) if (!after.has(id)) out.push({ kind, action: "remove", id, from: x });
@@ -272,6 +365,11 @@ export function diffSetups(a: OfficeSetup, b: OfficeSetup): Change[] {
     }
   }
   for (const [k, x] of ba) if (!bb.has(k)) out.push({ kind: "budget", action: "remove", id: k, from: x });
+
+  const la = new Set(a.locks ?? []);
+  const lb = new Set(b.locks ?? []);
+  for (const t of lb) if (!la.has(t)) out.push({ kind: "lock", action: "add", id: t });
+  for (const t of la) if (!lb.has(t)) out.push({ kind: "lock", action: "remove", id: t });
   return out;
 }
 
@@ -305,6 +403,9 @@ export function renderReadback(before: OfficeSetup, after: OfficeSetup, diff: Ch
         lines.push(`Close ${r.name}${gone.length ? ` and let go ${list(gone)}` : ""}. Their threads and tasks stay in the log.`);
       } else if (c.field === "head") lines.push(`${agentName(String(c.to))} becomes head of ${roomName(c.id)} (was ${agentName(String(c.from))}).`);
       else if (c.field === "name") lines.push(`Rename the room ${c.from} to ${c.to}.`);
+      else if (c.field === "permissions") lines.push(...permissionLines(roomName(c.id), "everyone in it", c.from, c.to));
+      else if (c.field === "whenBlocked") lines.push(`When someone in ${roomName(c.id)} is blocked, they ${WHEN_BLOCKED[c.to as WhenBlocked]}.`);
+      else if (c.field === "publish") lines.push(c.to === "direct" ? `${roomName(c.id)} opens PRs ready for review, not as drafts.` : `${roomName(c.id)} opens PRs as drafts for you to review first.`);
       else lines.push(`${roomName(c.id)}: ${fieldLabel(c.field!)} becomes "${c.to ?? "nothing"}".`);
     }
     if (c.kind === "agent") {
@@ -322,9 +423,13 @@ export function renderReadback(before: OfficeSetup, after: OfficeSetup, diff: Ch
         if (diff.some((d) => d.kind === "agent" && d.id === c.id && d.field === "runtime")) continue;
         if (c.field === "effort" && diff.some((d) => d.kind === "agent" && d.id === c.id && d.field === "model")) continue;
         lines.push(`${a.name} runs on ${runtimeLine(a)} (was ${c.field === "model" ? c.from : `${c.from} effort`}). Its next turn uses the new setting.`);
-      } else lines.push(`${a.name}: ${fieldLabel(c.field!)} becomes "${c.to}".`);
+      } else if (c.field === "permissions") lines.push(...permissionLines(a.name, a.name, c.from, c.to));
+      else lines.push(`${a.name}: ${fieldLabel(c.field!)} becomes "${c.to}".`);
     }
     if (c.kind === "policy") lines.push(`${POLICY_LABELS[c.field as keyof Policy](c.to)} (was ${policyValue(c.field as keyof Policy, c.from)}).`);
+    if (c.kind === "lock") {
+      lines.push(c.action === "add" ? `Lock: ${LOCK_TARGETS[c.id as LockTarget].toLowerCase()} can't be changed from chat until you unlock it.` : `Unlock: ${LOCK_TARGETS[c.id as LockTarget].toLowerCase()} can be changed from chat again.`);
+    }
     if (c.kind === "budget") {
       const b = (c.to ?? c.from) as Budget;
       const who = b.scope === "office" ? "the whole office" : b.scope === "room" ? roomName(b.id) : agentName(b.id);
@@ -379,6 +484,17 @@ function list(xs: string[]): string {
 
 function duration(sec: number): string {
   return sec < 120 ? `${sec} seconds` : sec < 7200 ? `${Math.round(sec / 60)} minutes` : `${Math.round(sec / 360) / 10} hours`;
+}
+
+const LEVEL_WORDS: Record<Level, string> = { free: "can", ask: "must ask you before they", never: "can never" };
+
+/** One line per permission that changed: "Backend must ask you before they reach the internet." */
+function permissionLines(scope: string, who: string, from: unknown, to: unknown): string[] {
+  const a = (from ?? {}) as Partial<Record<Permission, Level>>;
+  const b = (to ?? {}) as Partial<Record<Permission, Level>>;
+  return PERMISSIONS.filter((p) => a[p.id] !== b[p.id]).map((p) =>
+    b[p.id] ? `${who === scope ? scope : `${scope}: ${who}`} ${LEVEL_WORDS[b[p.id]!]} ${p.label.toLowerCase()}.` : `${scope}: ${p.label.toLowerCase()} goes back to the ${scope === who ? "room's" : "default"} setting.`,
+  );
 }
 
 function policyValue(k: keyof Policy, v: unknown): string {

@@ -148,6 +148,9 @@ export class OfficeLink {
         else r.fail(new OfficeError(msg.error.code, msg.error.message));
         return;
       }
+      case "brief":
+        this.opts.office.setBrief(msg.agent, msg.text);
+        return;
       case "config":
         try {
           this.opts.office.applyConfig(msg.config);

@@ -1,7 +1,7 @@
 import { toDaemonConfig, type OfficeSetup } from "@agentfloor/shared/setup";
 import type { OfficeConfig } from "@agentfloor/shared/types";
 import type { OfficeHub } from "../link/hub.ts";
-import { PolicyError, propose, type SetupOp } from "../policy/engine.ts";
+import { PolicyError, propose, type Actor, type SetupOp } from "../policy/engine.ts";
 import { StaleSetupError, type SetupStore } from "./store.ts";
 
 /** What the CEO's client (or Ada) sends: the engine's operations, plus restoring a saved version. */
@@ -36,17 +36,17 @@ export class SetupService {
     return this.store.versions(officeId);
   }
 
-  async propose(officeId: string, ops: ClientOp[]) {
+  async propose(officeId: string, ops: ClientOp[], actor: Actor = "ceo") {
     const { setup, version } = await this.store.load(officeId);
-    const p = propose(setup, await this.expand(officeId, ops));
+    const p = propose(setup, await this.expand(officeId, ops), actor);
     return { baseVersion: version, readback: p.readback, summary: p.summary, diff: p.diff, next: p.next };
   }
 
   /** Applies operations the CEO confirmed from a read-back made at baseVersion. */
-  async apply(officeId: string, ops: ClientOp[], baseVersion: number, by: string) {
+  async apply(officeId: string, ops: ClientOp[], baseVersion: number, by: Actor) {
     const { setup, version } = await this.store.load(officeId);
     if (version !== baseVersion) throw new StaleSetupError(`The setup changed since that read-back (now version ${version}). Review it again.`);
-    const p = propose(setup, await this.expand(officeId, ops));
+    const p = propose(setup, await this.expand(officeId, ops), by);
     const v = await this.store.apply(officeId, baseVersion, p.next, by, p.summary, p.readback, p.diff);
     await this.push(officeId, p.next, v).catch(() => {});
     return { version: v, readback: p.readback, summary: p.summary };

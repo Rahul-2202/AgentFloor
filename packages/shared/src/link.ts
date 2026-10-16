@@ -9,6 +9,7 @@
  *   api → daemon  call    {id, name, args}         a CEO call (the daemon's office tools)
  *   daemon → api  result  {id, ok, result | error}
  *   api → daemon  config  {config, version}        the office's setup (rooms, agents, policy); Supabase owns it
+ *   api → daemon  brief   {agent, text}            an agent's memory brief
  *   daemon → api  config_applied {version, ok, error?}
  *   daemon → api  live    {event}                  not stored: live session output, "thinking"
  *   daemon → api  request {id, name, args}         the office needs the API (a git token, a PR opened)
@@ -37,6 +38,8 @@ export type ApiMessage =
   | { t: "ack"; seq: number }
   | { t: "call"; id: string; name: string; args: unknown }
   | { t: "config"; config: OfficeConfig; version: number }
+  /** An agent's memory brief (written into its memory file before each turn). */
+  | { t: "brief"; agent: string; text: string }
   | { t: "response"; id: string; ok: true; result: unknown }
   | { t: "response"; id: string; ok: false; error: { code: string; message: string } };
 

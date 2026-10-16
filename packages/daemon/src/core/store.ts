@@ -26,6 +26,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS agent_settings (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS versions (v INTEGER PRIMARY KEY AUTOINCREMENT, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, type TEXT NOT NULL, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, json TEXT NOT NULL);
     `);
   }
 
@@ -148,6 +149,18 @@ export class Store {
   versions(): ConfigVersion[] {
     const rows = this.db.prepare("SELECT v, json FROM versions ORDER BY v").all() as { v: number; json: string }[];
     return rows.map((r) => ({ ...(JSON.parse(r.json) as Omit<ConfigVersion, "v">), v: r.v }));
+  }
+
+  /* --------------------------------------------------------------------- kv */
+
+  getKv<T>(key: string): T | undefined {
+    const row = this.db.prepare("SELECT json FROM kv WHERE key = ?").get(key) as { json: string } | undefined;
+    return row ? (JSON.parse(row.json) as T) : undefined;
+  }
+
+  setKv(key: string, value: unknown): void {
+    if (value === undefined) this.db.prepare("DELETE FROM kv WHERE key = ?").run(key);
+    else this.db.prepare("INSERT OR REPLACE INTO kv (key, json) VALUES (?, ?)").run(key, JSON.stringify(value));
   }
 
   /* ----------------------------------------------------------------- events */
