@@ -21,6 +21,11 @@ npm run dev -w @agentfloor/api   # http://localhost:4000
 npm run dev -w @agentfloor/web   # http://localhost:3000, sign in with GitHub
 ```
 
+In an office VM the daemon also dials out to the API's office link
+(`AGENTFLOOR_LINK_URL`, `AGENTFLOOR_OFFICE_TOKEN`): it streams its events
+(replaying anything the API missed) and answers the CEO's calls, which the web
+app sends as `POST /office/call`.
+
 Both read the root `.env` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
 `SUPABASE_SECRET_KEY`). The API checks its settings at start and names any
 that are missing. Staging: https://web-staging-4faf.up.railway.app

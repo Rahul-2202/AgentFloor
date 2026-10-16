@@ -2,7 +2,9 @@ import { loadEnv } from "@agentfloor/shared/env";
 import { buildApp } from "./app.ts";
 import { makeVerifier } from "./auth.ts";
 import { loadConfig } from "./config.ts";
-import { supabaseOfficeStore } from "./offices.ts";
+import { OfficeHub } from "./link/hub.ts";
+import { supabaseLinkStore } from "./link/store.ts";
+import { serviceClient, supabaseOfficeStore } from "./offices.ts";
 
 loadEnv();
 let config;
@@ -13,9 +15,11 @@ try {
   process.exit(1);
 }
 
+const db = serviceClient(config.supabaseUrl, config.supabaseSecretKey);
 const app = await buildApp({
   verify: makeVerifier(config),
-  offices: supabaseOfficeStore(config.supabaseUrl, config.supabaseSecretKey),
+  offices: supabaseOfficeStore(db),
+  hub: new OfficeHub(supabaseLinkStore(db), (msg) => console.log(msg)),
   webOrigins: config.webOrigins,
   logger: true,
 });
