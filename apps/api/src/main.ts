@@ -27,6 +27,8 @@ const machines = config.daytona
       link,
       connectedSince: (id) => hub.connectedSince(id),
       snapshot: config.daytona.snapshot,
+      kind: config.daytona.kind,
+      appDir: config.daytona.kind === "vm" ? "~/agentfloor" : "/opt/agentfloor",
       linkUrl: config.daytona.linkUrl,
       claudeSecret: config.daytona.claudeSecret,
       log: (msg) => console.log(msg),

@@ -19,6 +19,10 @@ export default defineRailway((ctx) => {
       SUPABASE_URL: preserve(),
       SUPABASE_SECRET_KEY: preserve(),
       WEB_ORIGINS: "https://${{web.RAILWAY_PUBLIC_DOMAIN}}",
+      // Office machines (Daytona). The snapshot name comes from infra/build-office-snapshot.ts.
+      DAYTONA_API_KEY: preserve(),
+      OFFICE_SNAPSHOT: preserve(),
+      OFFICE_SANDBOX_KIND: "container",
     },
   });
 

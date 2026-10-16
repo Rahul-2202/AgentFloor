@@ -37,7 +37,11 @@ export interface MachineOptions {
   linkUrl: string;
   /** Provider secret holding the Claude credential (limited to api.anthropic.com). */
   claudeSecret: string;
-  autoPauseMinutes?: number;
+  /** "container" (stops when idle; the daemon restarts on start) or "vm" (pauses with memory kept). */
+  kind?: "vm" | "container";
+  /** Where the snapshot put the code. */
+  appDir?: string;
+  idleMinutes?: number;
   /** How long to wait for the daemon to dial in after a start. */
   connectTimeoutMs?: number;
   /** After resuming, how long to wait for a still-running daemon to reconnect before starting a new one. */
@@ -46,23 +50,25 @@ export interface MachineOptions {
   log?: (msg: string) => void;
 }
 
-/** Where the snapshot puts the code, and where the office keeps its data (in the VM user's home). */
-const APP = "~/agentfloor";
+/** Where the office keeps its data (in the machine user's home, which survives stops). */
 const DATA = "~/office-data";
 const DAEMON_SESSION = "office-daemon";
 
 /**
- * The office VM's life: created on the first start, resumed on later ones,
- * paused when idle (memory kept, so agents carry on where they were), kept
- * awake while the office is busy.
+ * The office machine's life: created on the first start, resumed on later
+ * ones, paused (VM, memory kept) or stopped (container, agents resume their
+ * sessions on restart) when idle, kept awake while the office is busy.
  */
 export class OfficeMachines {
   private readonly o: MachineOptions;
   private readonly busy = new Map<string, Promise<string>>();
   private readonly lastTouch = new Map<string, number>();
 
+  private readonly kind: "vm" | "container";
+
   constructor(o: MachineOptions) {
     this.o = o;
+    this.kind = o.kind ?? "container";
   }
 
   /** Creates or resumes the office VM and waits for its daemon. Returns the state. */
@@ -78,6 +84,11 @@ export class OfficeMachines {
   async pause(officeId: string): Promise<string> {
     const m = await this.o.machines.get(officeId);
     if (!m.sandboxId) return m.state;
+    if (this.kind === "container") {
+      await this.o.machines.set(officeId, { state: "stopped" });
+      await this.o.cloud.stop(m.sandboxId);
+      return "stopped";
+    }
     await this.o.machines.set(officeId, { state: "pausing" });
     await this.o.cloud.pause(m.sandboxId);
     await this.o.machines.set(officeId, { state: "paused" });
@@ -117,7 +128,8 @@ export class OfficeMachines {
           labels: { app: "agentfloor", office: officeId },
           env: { AGENTFLOOR_LINK_URL: this.o.linkUrl, AGENTFLOOR_OFFICE_TOKEN: token },
           secrets: { AGENTFLOOR_CLAUDE_TOKEN: this.o.claudeSecret },
-          autoPauseMinutes: this.o.autoPauseMinutes ?? 15,
+          kind: this.kind,
+          idleMinutes: this.o.idleMinutes ?? 15,
         });
         log(`office ${officeId}: created VM ${id}`);
         await this.o.machines.set(officeId, { sandboxId: id, state: "starting" });
@@ -132,8 +144,11 @@ export class OfficeMachines {
           await this.o.cloud.start(m.sandboxId);
           log(`office ${officeId}: resumed VM from ${state}`);
         }
-        // A resumed pause keeps the daemon running; after a stop it has to be started again.
-        if (!(await this.waitForDaemon(officeId, since, this.o.resumeGraceMs ?? 15_000))) await this.startDaemon(m.sandboxId);
+        // A resumed pause keeps the daemon running (give it a moment to reconnect);
+        // after a stop, or if it's gone, it has to be started again.
+        const resumed = state === "paused" || state === "pausing";
+        const back = resumed ? await this.waitForDaemon(officeId, since, this.o.resumeGraceMs ?? 15_000) : (this.o.connectedSince(officeId) ?? -1) >= since;
+        if (!back) await this.startDaemon(m.sandboxId);
       }
       if (!(await this.waitForDaemon(officeId, since, this.o.connectTimeoutMs ?? 60_000))) {
         throw new Error("the office started but its daemon didn't connect");
@@ -153,8 +168,8 @@ export class OfficeMachines {
     await this.o.cloud.runInBackground(
       sandboxId,
       DAEMON_SESSION,
-      // Node and Claude Code live in ~/.local/bin (see infra/build-office-snapshot.ts).
-      `export PATH="$HOME/.local/bin:$PATH"; mkdir -p ${DATA} && cd ${APP} && npm run daemon -w @agentfloor/daemon -- --data ${DATA} >> ${DATA}/daemon.log 2>&1`,
+      // On VMs, Node and Claude Code live in ~/.local/bin (see infra/build-office-snapshot.ts).
+      `export PATH="$HOME/.local/bin:$PATH"; mkdir -p ${DATA} && cd ${this.o.appDir ?? "/opt/agentfloor"} && npm run daemon -w @agentfloor/daemon -- --data ${DATA} >> ${DATA}/daemon.log 2>&1`,
     );
   }
 

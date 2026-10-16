@@ -11,6 +11,8 @@ const schema = z.object({
   /** Office VMs (Daytona). Without a key, offices can't be started (everything else works). */
   DAYTONA_API_KEY: z.string().optional(),
   OFFICE_SNAPSHOT: z.string().default("agentfloor-office"),
+  /** "container" until Daytona enables Linux VMs for the organization. */
+  OFFICE_SANDBOX_KIND: z.enum(["container", "vm"]).default("container"),
   /** Daytona secret with the Claude credential, limited to api.anthropic.com. */
   DAYTONA_CLAUDE_SECRET: z.string().default("agentfloor-claude-token"),
   /** How office VMs reach this API's office link. Railway gives RAILWAY_PUBLIC_DOMAIN. */
@@ -26,7 +28,7 @@ export interface Config {
   jwksUrl: string;
   issuer: string;
   webOrigins: string[];
-  daytona: { apiKey: string; snapshot: string; claudeSecret: string; linkUrl: string } | null;
+  daytona: { apiKey: string; snapshot: string; kind: "container" | "vm"; claudeSecret: string; linkUrl: string } | null;
 }
 
 /** Reads and checks the environment; throws one error naming every missing or bad variable. */
@@ -54,5 +56,5 @@ function daytonaConfig(e: z.infer<typeof schema>): Config["daytona"] {
   if (!e.DAYTONA_API_KEY) return null;
   const linkUrl = e.LINK_URL ?? (e.RAILWAY_PUBLIC_DOMAIN ? `wss://${e.RAILWAY_PUBLIC_DOMAIN}/office-link` : null);
   if (!linkUrl) throw new Error("Bad configuration:\n  LINK_URL: needed with DAYTONA_API_KEY (how office VMs reach this API)");
-  return { apiKey: e.DAYTONA_API_KEY, snapshot: e.OFFICE_SNAPSHOT, claudeSecret: e.DAYTONA_CLAUDE_SECRET, linkUrl };
+  return { apiKey: e.DAYTONA_API_KEY, snapshot: e.OFFICE_SNAPSHOT, kind: e.OFFICE_SANDBOX_KIND, claudeSecret: e.DAYTONA_CLAUDE_SECRET, linkUrl };
 }

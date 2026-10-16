@@ -1,25 +1,34 @@
 /**
- * Builds the office VM snapshot (AGE-44): a Linux VM with Node 24, git,
- * Claude Code and the office daemon, ready for the Control API to start
- * offices from. VM snapshots can't come from a Dockerfile, so this boots a
- * VM, installs everything, stops it and snapshots its disk.
+ * Builds the office snapshot (AGE-44): Node 24, git, Claude Code and the
+ * office daemon, ready for the Control API to start offices from.
  *
- *   npm run snapshot -w @agentfloor/infra             build agentfloor-office-<version>
- *   npm run snapshot -w @agentfloor/infra -- --secret  also create/update the Claude secret
+ *   npm run snapshot -w @agentfloor/infra                 container snapshot (default)
+ *   npm run snapshot -w @agentfloor/infra -- --kind vm     Linux VM snapshot (when Daytona enables VMs)
+ *   ... -- --secret                                        also create/update the Claude secret
  *
- * Costs Daytona credit while it runs (one medium VM for ~10 minutes); the
- * build VM is deleted at the end, even on failure. Set OFFICE_SNAPSHOT on the
- * api service to the name it prints.
+ * Containers are built from an image recipe by Daytona, then checked by
+ * starting one office from the snapshot and deleting it. VM snapshots can't
+ * come from a recipe, so for VMs this boots one, installs everything, stops
+ * it and snapshots its disk. Either way the build machine is deleted at the
+ * end, even on failure. Set OFFICE_SNAPSHOT (and OFFICE_SANDBOX_KIND) on the
+ * api service to what it prints.
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { Daytona, type Sandbox } from "@daytona/sdk";
+import { Daytona, Image, type Sandbox } from "@daytona/sdk";
 import { loadEnv } from "@agentfloor/shared/env";
 
 loadEnv();
-const { values } = parseArgs({ options: { secret: { type: "boolean", default: false }, keep: { type: "boolean", default: false } } });
+const { values } = parseArgs({
+  options: {
+    secret: { type: "boolean", default: false },
+    keep: { type: "boolean", default: false },
+    kind: { type: "string", default: "container" },
+  },
+});
 
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const NODE = "24.11.1";
@@ -58,10 +67,54 @@ function daemonFiles(): string[] {
     .filter(Boolean);
 }
 
-async function build() {
+function snapshotName(): string {
   const version = JSON.parse(readFileSync(join(ROOT, "packages/daemon/package.json"), "utf8")).version as string;
   const sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], { encoding: "utf8", cwd: ROOT }).trim();
-  const name = `agentfloor-office-${version}-${sha}`;
+  return `agentfloor-office-${version}-${sha}${values.kind === "vm" ? "-vm" : ""}`;
+}
+
+/** Container snapshot: Daytona builds it from a recipe; then one office is started from it as a check. */
+async function buildContainer() {
+  const name = snapshotName();
+  // A clean copy of just what the daemon needs (committed files only).
+  const ctx = mkdtempSync(join(tmpdir(), "agentfloor-snapshot-"));
+  execFileSync("bash", ["-c", `git archive HEAD ${daemonFiles().map((f) => `'${f}'`).join(" ")} | tar -x -C '${ctx}'`], { cwd: ROOT });
+  const image = Image.base("node:24-bookworm") // has git and curl
+    .addLocalDir(ctx, "/opt/agentfloor")
+    .runCommands(
+      "cd /opt/agentfloor && npm ci -w @agentfloor/daemon --omit=dev --no-audit --no-fund",
+      "npm install -g --no-audit --no-fund @anthropic-ai/claude-code && claude --version",
+      "git config --system user.name AgentFloor && git config --system user.email agents@agentfloor.local",
+    );
+  try {
+    log(`building ${name} (Daytona builds the image; a few minutes)`);
+    await daytona.snapshot.create(
+      { name, image, resources: { cpu: 2, memory: 4, disk: 8 } },
+      { onLogs: (chunk) => process.stdout.write(chunk), timeout: 1800 },
+    );
+  } finally {
+    rmSync(ctx, { recursive: true, force: true });
+  }
+
+  log("checking: one office from the snapshot, daemon /health");
+  const sandbox = await daytona.create({ snapshot: name, labels: { app: "agentfloor", role: "snapshot-check" }, autoStopInterval: 15 }, { timeout: 300 });
+  try {
+    await run(sandbox, "versions", "node -v && git --version && claude --version");
+    await run(
+      sandbox,
+      "daemon smoke test",
+      "cd /opt/agentfloor && (timeout 25 npm run daemon -w @agentfloor/daemon -- --data /tmp/smoke --port 4399 > /tmp/smoke.log 2>&1 &) ; for i in $(seq 1 20); do curl -sf http://127.0.0.1:4399/health && exit 0; sleep 1; done; cat /tmp/smoke.log; exit 1",
+    );
+    await run(sandbox, "disk used", "du -sh /opt/agentfloor; df -h / | tail -1");
+    log(`done: set OFFICE_SNAPSHOT=${name} (OFFICE_SANDBOX_KIND=container) on the api service`);
+  } finally {
+    await sandbox.delete().catch((err) => log(`couldn't delete check sandbox ${sandbox.id}: ${err.message}`));
+    log("check sandbox deleted");
+  }
+}
+
+async function buildVm() {
+  const name = snapshotName();
 
   log(`building ${name} from ${BASE}`);
   const sandbox = await daytona.create(
@@ -95,7 +148,7 @@ async function build() {
     await sandbox.stop(300);
     log(`snapshotting as ${name} (a few minutes)`);
     await sandbox.createSnapshot(name, 1800);
-    log(`done: set OFFICE_SNAPSHOT=${name} on the api service`);
+    log(`done: set OFFICE_SNAPSHOT=${name} and OFFICE_SANDBOX_KIND=vm on the api service`);
   } finally {
     if (values.keep) log(`kept build VM ${sandbox.id}`);
     else {
@@ -106,4 +159,6 @@ async function build() {
 }
 
 if (values.secret) await ensureSecret();
-await build();
+if (values.kind === "vm") await buildVm();
+else if (values.kind === "container") await buildContainer();
+else throw new Error(`--kind is "container" or "vm", not "${values.kind}"`);
