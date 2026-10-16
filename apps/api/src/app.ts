@@ -4,12 +4,15 @@ import { LINK_PATH } from "@agentfloor/shared/link";
 import Fastify, { type FastifyRequest } from "fastify";
 import { AuthError, bearer, type User, type Verify } from "./auth.ts";
 import { LinkError, type OfficeHub } from "./link/hub.ts";
+import type { OfficeMachines } from "./machines/lifecycle.ts";
 import type { OfficeStore } from "./offices.ts";
 
 export interface Deps {
   verify: Verify;
   offices: OfficeStore;
   hub: OfficeHub;
+  /** Office VMs; null when Daytona isn't configured. */
+  machines?: OfficeMachines | null;
   webOrigins: string[];
   logger?: boolean;
 }
@@ -53,6 +56,25 @@ export async function buildApp(deps: Deps) {
     authed.post("/office", async (req, reply) => {
       const { office, created } = await deps.offices.ensureOffice(req.user);
       return reply.code(created ? 201 : 200).send({ office, created });
+    });
+
+    /** Starts the office VM (creates it the first time) and waits for its daemon. */
+    authed.post("/office/start", async (req, reply) => {
+      if (!deps.machines) return reply.code(503).send({ error: "Office computers aren't set up on this server." });
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      try {
+        return { state: await deps.machines.start(office.id) };
+      } catch (err) {
+        return reply.code(502).send({ error: `Couldn't start your office: ${(err as Error).message}` });
+      }
+    });
+
+    authed.post("/office/pause", async (req, reply) => {
+      if (!deps.machines) return reply.code(503).send({ error: "Office computers aren't set up on this server." });
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      return { state: await deps.machines.pause(office.id) };
     });
 
     /** Runs an office call (the daemon's CEO tools) in the user's office. */

@@ -1,0 +1,15 @@
+{
+  "name": "@agentfloor/infra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Builds the office VM snapshot and sets up Daytona secrets",
+  "type": "module",
+  "scripts": {
+    "snapshot": "node build-office-snapshot.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentfloor/shared": "*",
+    "@daytona/sdk": "^0.224.1"
+  }
+}

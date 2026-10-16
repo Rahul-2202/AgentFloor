@@ -20,6 +20,7 @@ export class LinkError extends Error {
 
 interface Conn {
   socket: WebSocket;
+  since: number;
   calls: Map<string, { ok: (v: unknown) => void; fail: (e: Error) => void; timer: NodeJS.Timeout }>;
 }
 
@@ -35,6 +36,9 @@ export class OfficeHub {
 
   private readonly heartbeatMs: number;
 
+  /** Called when an office sends events (it's doing something). */
+  onActivity: (officeId: string) => void = () => {};
+
   constructor(store: LinkStore, log: (msg: string) => void = () => {}, opts: { heartbeatMs?: number } = {}) {
     this.store = store;
     this.log = log;
@@ -43,6 +47,11 @@ export class OfficeHub {
 
   isConnected(officeId: string): boolean {
     return this.conns.has(officeId);
+  }
+
+  /** When the office's current connection was made (ms), or null if none. */
+  connectedSince(officeId: string): number | null {
+    return this.conns.get(officeId)?.since ?? null;
   }
 
   /** Runs one of the daemon's office calls as the CEO. */
@@ -87,7 +96,7 @@ export class OfficeHub {
         officeId = parsed.officeId;
         // A newer connection from the same office wins (the daemon restarted).
         this.conns.get(officeId)?.socket.close(CLOSE_REPLACED, "replaced by a newer connection");
-        conn = { socket, calls: new Map() };
+        conn = { socket, since: Date.now(), calls: new Map() };
         this.conns.set(officeId, conn);
         await this.store.setConnected(officeId, true);
         send(socket, { t: "welcome", officeId, lastSeq: await this.store.lastSeq(officeId) });
@@ -97,6 +106,7 @@ export class OfficeHub {
       if (msg.t === "events") {
         if (!msg.events.length) return;
         send(socket, { t: "ack", seq: await this.store.ingest(officeId, msg.events) });
+        this.onActivity(officeId);
       } else if (msg.t === "result") {
         const c = conn!.calls.get(msg.id);
         if (!c) return;

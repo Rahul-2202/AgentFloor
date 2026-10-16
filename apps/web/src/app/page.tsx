@@ -2,7 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
-import { ensureOffice, type Office } from "@/lib/api";
+import { ensureOffice, pauseOffice, startOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 
 type State =
@@ -69,9 +69,8 @@ export default function Home() {
             <dl className="grid grid-cols-2 gap-y-1 text-sm">
               <dt className="text-muted">Signed in as</dt>
               <dd>{state.session.user.user_metadata.user_name ?? state.session.user.email}</dd>
-              <dt className="text-muted">Office computer</dt>
-              <dd>{state.office.sandboxState === "none" ? "not created yet" : state.office.sandboxState}</dd>
             </dl>
+            <Machine office={state.office} />
             <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
               Sign out
             </button>
@@ -88,5 +87,59 @@ export default function Home() {
         )}
       </div>
     </main>
+  );
+}
+
+const LABELS: Record<string, string> = {
+  none: "not created yet",
+  creating: "setting up (first time takes a minute)",
+  starting: "starting",
+  started: "running",
+  pausing: "pausing",
+  paused: "paused",
+  stopped: "stopped",
+  archived: "stopped",
+  error: "needs attention",
+};
+
+/** The office computer: its state, and starting or pausing it. */
+function Machine({ office }: { office: Office }) {
+  const [state, setState] = useState(office.sandboxState);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async (action: () => Promise<{ state: string }>, during: string) => {
+    setBusy(true);
+    setError(null);
+    setState(during);
+    try {
+      setState((await action()).state);
+    } catch (err) {
+      setState("error");
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const running = state === "started";
+  return (
+    <div className="rounded-xl bg-surface-2 p-4 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span>
+          <span className="text-muted">Office computer: </span>
+          <span className={running ? "text-ok" : state === "error" ? "text-bad" : ""}>{LABELS[state] ?? state}</span>
+        </span>
+        {running ? (
+          <button disabled={busy} onClick={() => run(pauseOffice, "pausing")} className="rounded-lg px-3 py-1.5 text-muted ring-1 ring-line-2 disabled:opacity-50">
+            Pause
+          </button>
+        ) : (
+          <button disabled={busy} onClick={() => run(startOffice, state === "none" ? "creating" : "starting")} className="rounded-lg bg-ink px-3 py-1.5 font-medium text-white disabled:opacity-50">
+            Start office
+          </button>
+        )}
+      </div>
+      {error && <p className="mt-2 text-bad">{error}</p>}
+      <p className="mt-2 text-faint">It pauses by itself after 15 quiet minutes, and resumes where it left off.</p>
+    </div>
   );
 }

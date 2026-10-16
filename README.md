@@ -10,6 +10,7 @@ Run a company of AI agents from a pixel office. This repo is a monorepo
 | `supabase/` | Database schema (migrations), row-level security and its check |
 | `apps/api` | The Control API (Fastify): verifies Supabase sign-ins, creates each person's office |
 | `apps/web` | The web app (Next.js 16): GitHub sign-in; the pixel office comes in M6 |
+| `infra/` | Builds the office VM snapshot on Daytona (`npm run snapshot -w @agentfloor/infra`) |
 | `.railway/railway.ts` | Railway services `api` and `web` (staging deploys from `main`) |
 
 Run commands from the repo root; `.env` lives at the root too.
@@ -25,6 +26,12 @@ In an office VM the daemon also dials out to the API's office link
 (`AGENTFLOOR_LINK_URL`, `AGENTFLOOR_OFFICE_TOKEN`): it streams its events
 (replaying anything the API missed) and answers the CEO's calls, which the web
 app sends as `POST /office/call`.
+
+Office VMs (Daytona): with `DAYTONA_API_KEY` and `OFFICE_SNAPSHOT` set, the
+API creates each office's VM on its first **Start office**, resumes it later,
+and lets it pause after 15 quiet minutes (memory kept, agents carry on). The
+Claude credential reaches the VM only as a Daytona secret limited to
+`api.anthropic.com`.
 
 Both read the root `.env` (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`,
 `SUPABASE_SECRET_KEY`). The API checks its settings at start and names any
