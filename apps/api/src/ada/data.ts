@@ -165,11 +165,11 @@ export function supabaseOfficeData(db: SupabaseClient): OfficeData {
       return { id: r.id, role: r.role, content: r.content, cards: r.cards, mode: r.mode, createdAt: r.created_at };
     },
     async findCard(officeId, cardId) {
-      const rows = ok(await db.from("ada_messages").select("cards").eq("office_id", officeId).contains("cards", [{ id: cardId }]).limit(1), "finding card") as any[];
+      const rows = ok(await db.from("ada_messages").select("cards").eq("office_id", officeId).contains("cards", JSON.stringify([{ id: cardId }])).limit(1), "finding card") as any[];
       return (rows[0]?.cards as Card[] | undefined)?.find((c) => c.id === cardId) ?? null;
     },
     async updateCard(officeId, cardId, patch) {
-      const rows = ok(await db.from("ada_messages").select("id, cards").eq("office_id", officeId).contains("cards", [{ id: cardId }]).limit(1), "finding card") as any[];
+      const rows = ok(await db.from("ada_messages").select("id, cards").eq("office_id", officeId).contains("cards", JSON.stringify([{ id: cardId }])).limit(1), "finding card") as any[];
       if (!rows[0]) return null;
       const cards = (rows[0].cards as Card[]).map((c) => (c.id === cardId ? { ...c, ...patch } : c));
       ok(await db.from("ada_messages").update({ cards }).eq("id", rows[0].id), "updating card");

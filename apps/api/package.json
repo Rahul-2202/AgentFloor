@@ -12,7 +12,8 @@
     "dev": "node --watch src/main.ts",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check:supabase": "node scripts/check-supabase.ts"
+    "check:supabase": "node scripts/check-supabase.ts",
+    "check:ada": "node scripts/check-ada.ts"
   },
   "dependencies": {
     "@agentfloor/shared": "*",
