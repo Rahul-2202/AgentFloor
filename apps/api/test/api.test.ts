@@ -98,3 +98,17 @@ test("config names every missing variable", () => {
   assert.equal(c.issuer, "https://p.supabase.co/auth/v1");
   assert.deepEqual(c.webOrigins, ["http://a", "http://b"]);
 });
+
+test("a deleted account's leftover sign-in gets a 401, so the page signs out", async () => {
+  const { AuthError } = await import("../src/auth.ts");
+  const k = await keys();
+  const app = await buildApp({
+    verify: makeVerifier({ jwksUrl: "unused", issuer: ISSUER, keys: k.jwks }),
+    offices: { officeOf: async () => null, ensureOffice: async () => { throw new AuthError("Your account no longer exists. Sign in again."); } },
+    hub: new OfficeHub(memoryLinkStore()),
+    webOrigins: [],
+  });
+  const res = await app.inject({ method: "POST", url: "/office", headers: { authorization: `Bearer ${await k.sign(ALICE)}` } });
+  assert.equal(res.statusCode, 401);
+  assert.equal(res.json().code, "account_gone");
+});

@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { User } from "./auth.ts";
+import { AuthError, type User } from "./auth.ts";
 
 export interface Office {
   id: string;
@@ -59,6 +59,8 @@ export function supabaseOfficeStore(db: SupabaseClient): OfficeStore {
       if (error) {
         // Two first requests at once: the other one created it (owner_id is unique).
         if (error.code === "23505") return { office: (await officeOf(user.id))!, created: false };
+        // No profile: the account was deleted, but the browser still holds its sign-in.
+        if (error.code === "23503") throw new AuthError("Your account no longer exists. Sign in again.");
         throw new Error(`creating office: ${error.message}`);
       }
       await db.from("audit_log").insert({ office_id: data.id, actor: "system", action: "office.created" });

@@ -72,8 +72,29 @@ export class Ada {
 
   /* ---------------------------------------------------------------- chat */
 
+  private readonly greeting = new Map<string, Promise<ChatMessage>>();
+
   /** The CEO says something to Ada; her reply streams through onEvent and is saved. */
   async chat(officeId: string, message: string, onEvent: (e: AdaEvent) => void = () => {}): Promise<ChatMessage> {
+    if (message.trim()) return this.reply(officeId, message, onEvent);
+    // Opening the chat (no message): one greeting, however many times the page asks.
+    const last = (await this.d.data.history(officeId, 1)).at(-1);
+    if (last?.role === "ada") {
+      onEvent({ type: "done", message: last });
+      return last;
+    }
+    let p = this.greeting.get(officeId);
+    if (!p) {
+      p = this.reply(officeId, "", onEvent).finally(() => this.greeting.delete(officeId));
+      this.greeting.set(officeId, p);
+      return p;
+    }
+    const m = await p;
+    onEvent({ type: "done", message: m });
+    return m;
+  }
+
+  private async reply(officeId: string, message: string, onEvent: (e: AdaEvent) => void): Promise<ChatMessage> {
     const onboarding = !(await this.d.data.onboarded(officeId));
     const mode = onboarding ? "onboarding" : "chat";
     const history = await this.d.data.history(officeId, 24);

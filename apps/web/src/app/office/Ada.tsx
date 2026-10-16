@@ -61,7 +61,11 @@ export function AdaPanel({ officeId, onboarding, onClose, onDone }: { officeId: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [officeId]);
 
-  useEffect(() => bottom.current?.scrollIntoView({ behavior: "smooth" }), [lines]);
+  // A block body: newer browsers return a promise from scrollIntoView, and React
+  // would take a returned value for a cleanup function.
+  useEffect(() => {
+    bottom.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines]);
 
   const settle = (card: AdaCard, state: AdaCard["state"], version?: number) =>
     setLines((l) => l.map((x) => ({ ...x, cards: x.cards.map((c) => (c.id === card.id ? { ...c, state, version } : c)) })));
