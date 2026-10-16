@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 const schema = z.object({
@@ -18,6 +19,13 @@ const schema = z.object({
   /** How office VMs reach this API's office link. Railway gives RAILWAY_PUBLIC_DOMAIN. */
   LINK_URL: z.string().optional(),
   RAILWAY_PUBLIC_DOMAIN: z.string().optional(),
+  /** The GitHub App (agents' repo access). Without it, GitHub features are off. */
+  GITHUB_APP_ID: z.string().optional(),
+  GITHUB_APP_SLUG: z.string().optional(),
+  /** The app's private key: the PEM itself (Railway), or a path to the .pem file (local). */
+  GITHUB_APP_PRIVATE_KEY: z.string().optional(),
+  GITHUB_APP_PRIVATE_KEY_PATH: z.string().optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
 });
 
 export interface Config {
@@ -29,6 +37,7 @@ export interface Config {
   issuer: string;
   webOrigins: string[];
   daytona: { apiKey: string; snapshot: string; kind: "container" | "vm"; claudeSecret: string; linkUrl: string } | null;
+  github: { appId: string; slug: string; privateKey: string; webhookSecret: string } | null;
 }
 
 /** Reads and checks the environment; throws one error naming every missing or bad variable. */
@@ -49,12 +58,23 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     issuer: `${base}/auth/v1`,
     webOrigins: e.WEB_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     daytona: daytonaConfig(e),
+    github: githubConfig(e),
   };
 }
 
 function daytonaConfig(e: z.infer<typeof schema>): Config["daytona"] {
   if (!e.DAYTONA_API_KEY) return null;
   const linkUrl = e.LINK_URL ?? (e.RAILWAY_PUBLIC_DOMAIN ? `wss://${e.RAILWAY_PUBLIC_DOMAIN}/office-link` : null);
-  if (!linkUrl) throw new Error("Bad configuration:\n  LINK_URL: needed with DAYTONA_API_KEY (how office VMs reach this API)");
+  // Without an address the machines can reach (local development), office machines stay off.
+  if (!linkUrl) return null;
   return { apiKey: e.DAYTONA_API_KEY, snapshot: e.OFFICE_SNAPSHOT, kind: e.OFFICE_SANDBOX_KIND, claudeSecret: e.DAYTONA_CLAUDE_SECRET, linkUrl };
+}
+
+function githubConfig(e: z.infer<typeof schema>): Config["github"] {
+  const key = e.GITHUB_APP_PRIVATE_KEY ?? (e.GITHUB_APP_PRIVATE_KEY_PATH ? readFileSync(e.GITHUB_APP_PRIVATE_KEY_PATH, "utf8") : undefined);
+  const parts = { GITHUB_APP_ID: e.GITHUB_APP_ID, GITHUB_APP_SLUG: e.GITHUB_APP_SLUG, "GITHUB_APP_PRIVATE_KEY(_PATH)": key, GITHUB_WEBHOOK_SECRET: e.GITHUB_WEBHOOK_SECRET };
+  const missing = Object.entries(parts).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length === 4) return null;
+  if (missing.length) throw new Error(`Bad configuration:\n  GitHub App needs ${missing.join(", ")}`);
+  return { appId: e.GITHUB_APP_ID!, slug: e.GITHUB_APP_SLUG!, privateKey: key!, webhookSecret: e.GITHUB_WEBHOOK_SECRET! };
 }

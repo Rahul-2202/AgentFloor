@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import { ensureOffice, pauseOffice, startOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import { Console } from "./office/Console";
 
 type State =
   | { kind: "loading" }
@@ -40,6 +41,28 @@ export default function Home() {
   const signIn = () =>
     supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: window.location.origin } });
 
+  if (state.kind === "office") {
+    return (
+      <main className="mx-auto min-h-dvh max-w-5xl px-4 py-6">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="font-display text-2xl font-semibold">{state.office.name}</h1>
+            <p className="text-sm text-muted">
+              {state.created ? "Your office is ready." : "AgentFloor"} · signed in as {state.session.user.user_metadata.user_name ?? state.session.user.email}
+            </p>
+          </div>
+          <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
+            Sign out
+          </button>
+        </header>
+        <div className="mt-4">
+          <Machine office={state.office} />
+        </div>
+        <Console officeId={state.office.id} running />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-dvh grid place-items-center px-4">
       <div className="w-full max-w-sm rounded-2xl bg-surface p-8 shadow-[var(--shadow-card)]">
@@ -58,23 +81,6 @@ export default function Home() {
             </button>
             {state.error && <p className="mt-3 text-sm text-bad">{state.error}</p>}
           </>
-        )}
-
-        {state.kind === "office" && (
-          <div className="mt-8 space-y-3">
-            <p>
-              {state.created ? "Your office is ready: " : "Welcome back to "}
-              <span className="font-semibold">{state.office.name}</span>
-            </p>
-            <dl className="grid grid-cols-2 gap-y-1 text-sm">
-              <dt className="text-muted">Signed in as</dt>
-              <dd>{state.session.user.user_metadata.user_name ?? state.session.user.email}</dd>
-            </dl>
-            <Machine office={state.office} />
-            <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
-              Sign out
-            </button>
-          </div>
         )}
 
         {state.kind === "error" && (
@@ -97,8 +103,8 @@ const LABELS: Record<string, string> = {
   started: "running",
   pausing: "pausing",
   paused: "paused",
-  stopped: "stopped",
-  archived: "stopped",
+  stopped: "asleep",
+  archived: "asleep",
   error: "needs attention",
 };
 
@@ -129,8 +135,8 @@ function Machine({ office }: { office: Office }) {
           <span className={running ? "text-ok" : state === "error" ? "text-bad" : ""}>{LABELS[state] ?? state}</span>
         </span>
         {running ? (
-          <button disabled={busy} onClick={() => run(pauseOffice, "pausing")} className="rounded-lg px-3 py-1.5 text-muted ring-1 ring-line-2 disabled:opacity-50">
-            Pause
+          <button disabled={busy} onClick={() => run(pauseOffice, "stopped")} className="rounded-lg px-3 py-1.5 text-muted ring-1 ring-line-2 disabled:opacity-50">
+            Stop
           </button>
         ) : (
           <button disabled={busy} onClick={() => run(startOffice, state === "none" ? "creating" : "starting")} className="rounded-lg bg-ink px-3 py-1.5 font-medium text-white disabled:opacity-50">
@@ -139,7 +145,7 @@ function Machine({ office }: { office: Office }) {
         )}
       </div>
       {error && <p className="mt-2 text-bad">{error}</p>}
-      <p className="mt-2 text-faint">It pauses by itself after 15 quiet minutes, and resumes where it left off.</p>
+      <p className="mt-2 text-faint">It goes to sleep after 15 quiet minutes. Starting it again takes a few seconds, and agents pick up their conversations.</p>
     </div>
   );
 }

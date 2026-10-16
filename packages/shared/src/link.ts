@@ -8,9 +8,14 @@
  *   api → daemon  ack     {seq}                    stored up to seq
  *   api → daemon  call    {id, name, args}         a CEO call (the daemon's office tools)
  *   daemon → api  result  {id, ok, result | error}
+ *   api → daemon  config  {config, version}        the office's setup (rooms, agents, policy); Supabase owns it
+ *   daemon → api  config_applied {version, ok, error?}
+ *   daemon → api  live    {event}                  not stored: live session output, "thinking"
+ *   daemon → api  request {id, name, args}         the office needs the API (a git token, a PR opened)
+ *   api → daemon  response {id, ok, result | error}
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { OfficeEvent } from "./types.ts";
+import type { OfficeConfig, OfficeEvent } from "./types.ts";
 
 export const LINK_PATH = "/office-link";
 
@@ -22,12 +27,18 @@ export type DaemonMessage =
   | { t: "hello"; token: string; version: string }
   | { t: "events"; events: OfficeEvent[] }
   | { t: "result"; id: string; ok: true; result: unknown }
-  | { t: "result"; id: string; ok: false; error: { code: string; message: string } };
+  | { t: "result"; id: string; ok: false; error: { code: string; message: string } }
+  | { t: "config_applied"; version: number; ok: boolean; error?: string }
+  | { t: "live"; event: OfficeEvent }
+  | { t: "request"; id: string; name: string; args: unknown };
 
 export type ApiMessage =
   | { t: "welcome"; officeId: string; lastSeq: number }
   | { t: "ack"; seq: number }
-  | { t: "call"; id: string; name: string; args: unknown };
+  | { t: "call"; id: string; name: string; args: unknown }
+  | { t: "config"; config: OfficeConfig; version: number }
+  | { t: "response"; id: string; ok: true; result: unknown }
+  | { t: "response"; id: string; ok: false; error: { code: string; message: string } };
 
 /**
  * Office tokens look like `afo_<office id>_<secret>`. Only a hash of the

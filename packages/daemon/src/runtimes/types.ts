@@ -30,8 +30,10 @@ export interface AgentContext {
   office: OfficeClient;
   /** The agent's own folder (session ids and runtime config live here). */
   home: string;
-  /** The agent's working directory, where its CLI runs (its worktree, later). */
+  /** The agent's working directory, where its CLI runs: its worktree of the office repo, or its own folder. */
   workdir: string;
+  /** The workdir is a worktree of the office repo: the office's own files stay out of it. */
+  inRepo?: boolean;
   /** Environment for the agent's process: office URL and token, PATH with `office`, keys. */
   env: Record<string, string>;
   /** The repo root, for paths to the MCP server and the `office` command. */

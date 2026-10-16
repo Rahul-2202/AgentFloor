@@ -27,6 +27,24 @@ In an office VM the daemon also dials out to the API's office link
 (replaying anything the API missed) and answers the CEO's calls, which the web
 app sends as `POST /office/call`.
 
+What the API does for an office (M2):
+
+- **Setup** (`/office/setup`, `/propose`, `/apply`, `/versions`): rooms, agents, policy and budgets,
+  changed only through the policy engine (`apps/api/src/policy/engine.ts`). The read-back is
+  written from the diff; applying needs the version the read-back was made from; any version can
+  be restored. The office daemon gets every new version over the link and starts, stops or
+  restarts agents to match.
+- **Projection** (`apps/api/src/projection`): the office's event log becomes rows (threads,
+  messages, tasks, inbox, agent status, usage with API-equivalent cost) that the web app reads
+  under row-level security and follows with Supabase Realtime.
+- **Budgets**: daily limits per office, room or agent; over the warning limit the CEO gets an
+  inbox item, over the hard limit the agents in scope are put on hold until they're back under.
+- **Live** (`/office/live` WebSocket): agents' session output as it happens, and taking over an
+  agent's terminal (Daytona PTY) while the agent waits.
+- **GitHub** (`/office/github`, `/office/prs/:n`): the GitHub App gives agents repo access with
+  short-lived tokens for the office's repo only. Each agent works in its own worktree; agents open
+  PRs, heads ask for merges, and only the CEO merges.
+
 Office VMs (Daytona): with `DAYTONA_API_KEY` and `OFFICE_SNAPSHOT` set, the
 API creates each office's VM on its first **Start office**, resumes it later,
 and lets it pause after 15 quiet minutes (memory kept, agents carry on). The

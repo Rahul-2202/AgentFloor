@@ -1,14 +1,9 @@
 import { readFileSync } from "node:fs";
 import { CATALOG, DEFAULT_RUNTIME } from "./catalog.ts";
-import { CEO, OFFICE, type OfficeConfig, type Policy } from "./types.ts";
+import { CEO, OFFICE, type OfficeConfig } from "./types.ts";
 
-export const DEFAULT_POLICY: Policy = {
-  askDeadlineSec: 300,
-  maxHops: 3,
-  threadMaxMessages: 20,
-  huddleMaxTurns: 10,
-  ceoReach: "heads",
-};
+export { DEFAULT_POLICY } from "@agentfloor/shared/setup";
+import { DEFAULT_POLICY } from "@agentfloor/shared/setup";
 
 /** Loads and checks an office config. Throws with every problem found. */
 export function loadConfig(path: string): OfficeConfig {

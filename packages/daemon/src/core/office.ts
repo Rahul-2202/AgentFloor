@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { CATALOG } from "./catalog.ts";
+import { checkConfig } from "./config.ts";
 import { Store } from "./store.ts";
 import {
   CEO,
@@ -15,6 +16,7 @@ import {
   type OfficeConfig,
   type OfficeEvent,
   type Task,
+  type TaskOutput,
   type TaskStatus,
   type Thread,
   type ThreadKind,
@@ -23,6 +25,14 @@ import {
 
 export interface OfficeOptions {
   now?: () => number;
+}
+
+/** What the office needs from outside itself (the daemon fills these in). */
+export interface OfficeHooks {
+  /** Asks the Control API (over the office link). */
+  api?: (name: string, args: unknown) => Promise<unknown>;
+  /** Pushes the agent's current branch and returns its name. */
+  push?: (agent: string) => Promise<string>;
 }
 
 export interface OutputLine {
@@ -57,10 +67,11 @@ function deliverableAt(m: Message, point: DeliveryPoint): boolean {
  */
 export class Office {
   readonly bus = new EventEmitter();
+  hooks: OfficeHooks = {};
   readonly config: OfficeConfig;
   readonly store: Store;
   private readonly now: () => number;
-  private readonly agents: Map<string, AgentDef>;
+  private agents: Map<string, AgentDef>;
 
   constructor(config: OfficeConfig, store: Store, opts: OfficeOptions = {}) {
     this.config = config;
@@ -364,10 +375,11 @@ export class Office {
     return { threadId: t.id, messageIds: msgs.map((m) => m.id) };
   }
 
-  requestWork(from: string, a: { to: string; title: string; details?: string; urgency?: Urgency }) {
+  requestWork(from: string, a: { to: string; title: string; details?: string; urgency?: Urgency; dod?: string; parentId?: string }) {
     if (from !== CEO) this.agent(from);
     this.checkWorkRoute(from, a.to);
     const owner = this.agent(a.to);
+    if (a.parentId && !this.store.getTask(a.parentId)) throw new OfficeError("unknown_task", `No task "${a.parentId}".`);
     const task = this.saveTask({
       id: this.store.nextId("K"),
       title: a.title,
@@ -378,10 +390,22 @@ export class Office {
       status: "queued",
       progress: 0,
       note: null,
+      dod: a.dod ?? null,
+      step: null,
+      blocker: null,
+      checklist: [],
+      outputs: [],
+      parentId: a.parentId ?? null,
+      createdAt: this.now(),
       updatedAt: this.now(),
     });
     const t = this.newThread("message", from, [from, owner.id], a.title, { taskId: task.id });
-    this.post(t, from, [owner.id], "request_work", `New task ${task.id}: ${a.title}${a.details ? `\n\n${a.details}` : ""}`, a.urgency ?? "normal");
+    const body = [
+      `New task ${task.id}${task.parentId ? ` (part of ${task.parentId})` : ""}: ${a.title}`,
+      a.details ?? "",
+      a.dod ? `Done means: ${a.dod}` : "",
+    ].filter(Boolean).join("\n\n");
+    this.post(t, from, [owner.id], "request_work", body, a.urgency ?? "normal");
     return { taskId: task.id, threadId: t.id };
   }
 
@@ -446,16 +470,28 @@ export class Office {
     return { threadId: t.id };
   }
 
-  createTask(from: string, a: { owner: string; title: string; details?: string }) {
+  createTask(from: string, a: { owner: string; title: string; details?: string; dod?: string; parentId?: string }) {
     const me = this.agent(from);
     const owner = this.agent(a.owner);
     if (me.role !== "head" || owner.room !== me.room) {
       throw new OfficeError("not_allowed", "Only a room's head can create tasks for its members. Use request_work to ask for work.");
     }
-    return this.requestWork(from, { to: a.owner, title: a.title, details: a.details });
+    return this.requestWork(from, { to: a.owner, title: a.title, details: a.details, dod: a.dod, parentId: a.parentId });
   }
 
-  updateTask(from: string, a: { taskId: string; status?: TaskStatus; progress?: number; note?: string }) {
+  updateTask(
+    from: string,
+    a: {
+      taskId: string;
+      status?: TaskStatus;
+      progress?: number;
+      note?: string;
+      step?: string;
+      blocker?: string;
+      checklist?: { text: string; done: boolean }[];
+      output?: TaskOutput;
+    },
+  ) {
     const task = this.store.getTask(a.taskId);
     if (!task) throw new OfficeError("unknown_task", `No task "${a.taskId}".`);
     if (from !== CEO && from !== task.owner && from !== this.headOf(task.room)) {
@@ -464,6 +500,11 @@ export class Office {
     if (a.status) task.status = a.status;
     if (a.progress !== undefined) task.progress = Math.max(0, Math.min(100, Math.round(a.progress)));
     if (a.note !== undefined) task.note = a.note;
+    if (a.step !== undefined) task.step = a.step;
+    if (a.blocker !== undefined) task.blocker = a.blocker || null;
+    if (a.status && a.status !== "blocked") task.blocker = null;
+    if (a.checklist) task.checklist = a.checklist.slice(0, 50);
+    if (a.output) task.outputs = [...(task.outputs ?? []).filter((o) => !(o.url && o.url === a.output!.url)), a.output];
     if (task.status === "done") task.progress = 100;
     task.updatedAt = this.now();
     return this.saveTask(task);
@@ -776,7 +817,117 @@ export class Office {
       t.tokens = (t.tokens ?? 0) + input + c.outputTokens;
       this.store.putThread(t);
     }
-    this.bus.emit("event", { seq: 0, at: this.now(), type: "model.call", data: { agent, threadId: threadId ?? null, ...c } } satisfies OfficeEvent);
+    // Stored (not just streamed): spend and budgets are worked out from these.
+    this.emit("model.call", { agent, threadId: threadId ?? null, ...c });
+  }
+
+  /* --------------------------------------------------------------- github */
+
+  private needRepo() {
+    if (!this.config.repo) throw new OfficeError("no_repo", "The office has no GitHub repo connected yet. Ask the CEO to connect one.");
+    return this.config.repo;
+  }
+
+  /** A short-lived token for git (the credential helper asks for it). */
+  async gitToken(): Promise<{ username: string; password: string }> {
+    this.needRepo();
+    if (!this.hooks.api) throw new OfficeError("offline", "The office isn't connected to AgentFloor, so it can't reach GitHub.");
+    return (await this.hooks.api("git_token", {})) as { username: string; password: string };
+  }
+
+  /** Pushes the agent's branch and opens a PR for it; the PR becomes an output of the task. */
+  async openPr(agent: string, a: { title: string; body?: string; taskId?: string; draft?: boolean }) {
+    const me = this.agent(agent);
+    const repo = this.needRepo();
+    if (!this.hooks.api || !this.hooks.push) throw new OfficeError("offline", "The office isn't connected to AgentFloor, so it can't reach GitHub.");
+    const task = a.taskId ? this.store.getTask(a.taskId) : undefined;
+    if (a.taskId && !task) throw new OfficeError("unknown_task", `No task "${a.taskId}".`);
+    let branch: string;
+    try {
+      branch = await this.hooks.push(agent);
+    } catch (err) {
+      throw new OfficeError("git", (err as Error).message);
+    }
+    const body = [a.body ?? "", task ? `\n\nOffice task ${task.id}: ${task.title}` : "", `\n\nOpened by ${me.name} (AgentFloor).`].join("");
+    const pr = (await this.hooks.api("open_pr", { head: branch, base: repo.defaultBranch, title: a.title, body, draft: a.draft ?? false })) as { number: number; url: string };
+    if (task) this.updateTask(agent === task.owner || agent === this.headOf(task.room) ? agent : CEO, { taskId: task.id, output: { kind: "pr", title: `#${pr.number} ${a.title}`, url: pr.url } });
+    this.emit("pr.opened", { agent, number: pr.number, url: pr.url, branch, taskId: task?.id ?? null });
+    return { ...pr, branch };
+  }
+
+  /** Heads ask the CEO to merge a PR. Merging is the CEO's alone (a locked rule): it lands in the inbox. */
+  requestMerge(from: string, a: { pr: number; summary: string; taskId?: string }) {
+    const me = this.agent(from);
+    const repo = this.needRepo();
+    if (me.role !== "head") throw new OfficeError("not_allowed", `Merges go through your head, ${this.nameOf(this.headOf(me.room))}. Tell them the PR is ready.`);
+    const url = `https://github.com/${repo.fullName}/pull/${a.pr}`;
+    const t = this.newThread("message", from, [from, CEO], `Merge PR #${a.pr}`, { taskId: a.taskId ?? null, awaiting: { by: from, from: CEO, deadlineAt: 0 } });
+    this.post(t, from, [CEO], "ask", `Please merge PR #${a.pr}: ${a.summary}\n${url}`, "normal");
+    const item = this.addInbox({ kind: "approval", from, threadId: t.id, title: `Merge PR #${a.pr}`, body: a.summary, action: { type: "merge", pr: a.pr, url, repo: repo.fullName } });
+    return { threadId: t.id, inboxId: item.id };
+  }
+
+  /* ------------------------------------------------------- office setup */
+
+  /**
+   * Replaces the office's rooms, agents and policy (the Control API owns them).
+   * Existing agents keep their object, so hosts and runtimes see the change.
+   * Returns which agents were added, removed or changed; the daemon starts,
+   * stops or restarts their runtimes.
+   */
+  applyConfig(next: OfficeConfig): { added: string[]; removed: string[]; changed: string[] } {
+    const checked = checkConfig(structuredClone(next));
+    const before = new Map(this.config.agents.map((a) => [a.id, JSON.stringify(a)]));
+    this.config.name = checked.name;
+    Object.assign(this.config.policy, checked.policy);
+    const repoChanged = JSON.stringify(this.config.repo ?? null) !== JSON.stringify(checked.repo ?? null);
+    this.config.repo = checked.repo ?? null;
+    this.config.rooms.splice(0, this.config.rooms.length, ...checked.rooms);
+    const agents = checked.agents.map((n) => {
+      const cur = this.agents.get(n.id);
+      if (!cur) return n;
+      for (const k of Object.keys(cur)) delete (cur as unknown as Record<string, unknown>)[k];
+      return Object.assign(cur, n);
+    });
+    this.config.agents.splice(0, this.config.agents.length, ...agents);
+    this.agents = new Map(agents.map((a) => [a.id, a]));
+    // Keep the saved settings in step, so a restart before the next push agrees.
+    for (const a of agents) this.store.putAgentSettings(a.id, this.settingsOf(a.id));
+
+    const added = agents.filter((a) => !before.has(a.id)).map((a) => a.id);
+    const removed = [...before.keys()].filter((id) => !this.agents.has(id));
+    // A new repo moves everyone into a worktree of it: every agent restarts.
+    const changed = agents.filter((a) => before.has(a.id) && (repoChanged || before.get(a.id) !== JSON.stringify(a))).map((a) => a.id);
+    if (added.length || removed.length || changed.length || repoChanged) this.emit("config.applied", { added, removed, changed, repoChanged });
+    return { added, removed, changed };
+  }
+
+  /* ---------------------------------------------------------------- holds */
+
+  private readonly holds = new Map<string, string>();
+
+  /** Parks an agent (budget reached, or the CEO took over its terminal): its turn stops and none start until released. */
+  hold(agent: string, reason: string) {
+    this.agent(agent);
+    this.holds.set(agent, reason);
+    this.emit("agent.held", { agent, reason });
+    return { agent, held: true };
+  }
+
+  release(agent: string) {
+    this.agent(agent);
+    if (this.holds.delete(agent)) this.emit("agent.released", { agent });
+    return { agent, held: false };
+  }
+
+  heldReason(agent: string): string | null {
+    return this.holds.get(agent) ?? null;
+  }
+
+  /** The agent's recent live session lines (a short buffer, for opening its terminal). */
+  outputOf(agent: string): OutputLine[] {
+    this.agent(agent);
+    return this.outputs.get(agent) ?? [];
   }
 
   /* ------------------------------------------------------------- snapshot */
@@ -797,6 +948,7 @@ export class Office {
       tasks: this.store.tasks(),
       inbox: this.store.inbox(),
       queued: Object.fromEntries(this.config.agents.map((a) => [a.id, this.store.queuedFor(a.id).length])),
+      holds: Object.fromEntries(this.holds),
     };
   }
 }

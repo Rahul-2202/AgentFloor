@@ -7,6 +7,7 @@ import {
   type ApiMessage,
   type DaemonMessage,
 } from "@agentfloor/shared/link";
+import type { OfficeConfig, OfficeEvent } from "@agentfloor/shared/types";
 import type { WebSocket } from "ws";
 import type { LinkStore } from "./store.ts";
 
@@ -38,6 +39,17 @@ export class OfficeHub {
 
   /** Called when an office sends events (it's doing something). */
   onActivity: (officeId: string) => void = () => {};
+  /** Called after events are stored; projection into tables runs here (awaited before the ack). */
+  onEvents: (officeId: string, events: OfficeEvent[]) => Promise<void> = async () => {};
+  /** A daemon connected (send it its setup). */
+  onConnect: (officeId: string) => void = () => {};
+  onConfigApplied: (officeId: string, version: number, ok: boolean, error?: string) => void = () => {};
+  /** The office asks the API for something (a git token, a PR opened). */
+  onRequest: (officeId: string, name: string, args: unknown) => Promise<unknown> = async (_o, name) => {
+    throw new LinkError("unavailable", `"${name}" isn't available on this server.`);
+  };
+  /** Live events (session output, "thinking"), for browsers watching the office. */
+  onLive: (officeId: string, event: OfficeEvent) => void = () => {};
 
   constructor(store: LinkStore, log: (msg: string) => void = () => {}, opts: { heartbeatMs?: number } = {}) {
     this.store = store;
@@ -49,9 +61,22 @@ export class OfficeHub {
     return this.conns.has(officeId);
   }
 
+  /** Offices with a daemon connected now. */
+  connectedOffices(): string[] {
+    return [...this.conns.keys()];
+  }
+
   /** When the office's current connection was made (ms), or null if none. */
   connectedSince(officeId: string): number | null {
     return this.conns.get(officeId)?.since ?? null;
+  }
+
+  /** Sends the office's daemon its setup. */
+  sendConfig(officeId: string, config: OfficeConfig, version: number): boolean {
+    const conn = this.conns.get(officeId);
+    if (!conn) return false;
+    send(conn.socket, { t: "config", config, version });
+    return true;
   }
 
   /** Runs one of the daemon's office calls as the CEO. */
@@ -101,12 +126,27 @@ export class OfficeHub {
         await this.store.setConnected(officeId, true);
         send(socket, { t: "welcome", officeId, lastSeq: await this.store.lastSeq(officeId) });
         this.log(`office ${officeId} connected`);
+        this.onConnect(officeId);
         return;
       }
       if (msg.t === "events") {
         if (!msg.events.length) return;
-        send(socket, { t: "ack", seq: await this.store.ingest(officeId, msg.events) });
+        const seq = await this.store.ingest(officeId, msg.events);
+        await this.onEvents(officeId, msg.events).catch((err) => this.log(`office ${officeId}: projecting events: ${(err as Error).message}`));
+        send(socket, { t: "ack", seq });
         this.onActivity(officeId);
+      } else if (msg.t === "request") {
+        // Answered in the background, so a slow GitHub call doesn't hold up the office's events.
+        const id = officeId;
+        void this.onRequest(id, msg.name, msg.args).then(
+          (result) => send(socket, { t: "response", id: msg.id, ok: true, result }),
+          (err: Error & { code?: string }) => send(socket, { t: "response", id: msg.id, ok: false, error: { code: err.code ?? "error", message: err.message } }),
+        );
+      } else if (msg.t === "live") {
+        this.onLive(officeId, msg.event);
+      } else if (msg.t === "config_applied") {
+        if (!msg.ok) this.log(`office ${officeId} refused setup v${msg.version}: ${msg.error}`);
+        this.onConfigApplied(officeId, msg.version, msg.ok, msg.error);
       } else if (msg.t === "result") {
         const c = conn!.calls.get(msg.id);
         if (!c) return;

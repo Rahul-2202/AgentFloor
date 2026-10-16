@@ -15,7 +15,9 @@ export const claudeCode = cliRuntime({
   capabilities: { structuredOutput: true, resume: true, mcp: true, toolHooks: true, interrupt: true, memoryFile: "CLAUDE.md", gateway: true },
 
   prepare(ctx) {
-    writeFile(join(ctx.workdir, "CLAUDE.md"), memoryFile(ctx.agent, ctx.config));
+    // In a repo worktree, the agent's memory sits one folder up (Claude Code reads CLAUDE.md
+    // from parent folders too), so it never overwrites the repo's own CLAUDE.md or lands in a PR.
+    writeFile(join(ctx.inRepo ? ctx.home : ctx.workdir, "CLAUDE.md"), memoryFile(ctx.agent, ctx.config));
     writeFile(join(ctx.home, "mcp.json"), JSON.stringify({ mcpServers: { office: officeMcpServer(ctx) } }, null, 2));
     writeFile(
       join(ctx.home, "settings.json"),
@@ -41,7 +43,7 @@ export const claudeCode = cliRuntime({
       "--mcp-config", join(ctx.home, "mcp.json"),
       "--strict-mcp-config",
       "--settings", join(ctx.home, "settings.json"),
-      "--append-system-prompt", officeInstructions(ctx.agent),
+      "--append-system-prompt", officeInstructions(ctx.agent, ctx.config.repo),
       // Edits in its own folder and the office are free; anything else is refused.
       "--permission-mode", "acceptEdits",
       "--allowedTools", "mcp__office", "Read", "Write", "Edit", "Glob", "Grep", "Bash(office:*)", "Bash(ls:*)", "Bash(cat:*)", "Bash(git:*)",
