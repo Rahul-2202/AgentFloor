@@ -118,13 +118,16 @@ export function buildState(i: RealInputs, layout: Layout) {
   const queued = new Map<string, number>();
   for (const m of data.messages) if (m.to !== "ceo" && (m as MessageRow & { state?: string }).state === "queued") queued.set(m.to, (queued.get(m.to) ?? 0) + 1);
   const openTasks = data.tasks.filter((t) => t.status !== "done");
+  // A head waiting on a meeting request waits at the CEO's door (first two; the rest stay at their desks).
+  const knocking = [...new Set(data.inbox.filter((x) => x.state === "open" && x.kind === "meeting_request").map((x) => x.from))].slice(0, 2);
 
   for (const a of agents) {
     const row = rowOf.get(a.id);
     const task = openTasks.filter((t) => t.owner_id === a.id).sort((x, y) => y.updated_at.localeCompare(x.updated_at))[0];
     const meetingSeat = liveMeeting?.attendees.includes(a.id) ? MEETING_SEATS[liveMeeting.attendees.indexOf(a.id) % MEETING_SEATS.length] : null;
     const visit = i.visits[a.id]?.startsWith("beside:") ? SPOTS[i.visits[a.id]!.slice(7)] : undefined;
-    const at: AgentLive["at"] = meetingSeat ?? (visit ? [visit[0] + 1.2, visit[1] + 0.6] : undefined) ?? layout.homes[a.id] ?? "hall:mid";
+    const door = knocking.includes(a.id) ? (knocking.indexOf(a.id) ? "ceo:outside2" : "ceo:outside") : undefined;
+    const at: AgentLive["at"] = meetingSeat ?? (visit ? [visit[0] + 1.2, visit[1] + 0.6] : undefined) ?? door ?? layout.homes[a.id] ?? "hall:mid";
     let status: AgentStatus = "idle";
     if (row?.held_reason || row?.status === "stopped" || row?.status === "offline") status = "away";
     else if (meetingSeat) status = "meeting";
@@ -139,7 +142,7 @@ export function buildState(i: RealInputs, layout: Layout) {
       upNext: openTasks.filter((t) => t.owner_id === a.id && t.id !== task?.id).slice(0, 2).map((t) => t.id),
       paused: !!row?.held_reason,
       bubble: i.bubbles[a.id] ?? null,
-      emote: task?.status === "blocked" ? "!" : null,
+      emote: door ? "?" : task?.status === "blocked" ? "!" : null,
       queued: queued.get(a.id) ?? 0,
     };
   }
