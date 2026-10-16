@@ -4,15 +4,21 @@
   "private": true,
   "description": "AgentFloor: run a company of AI agents from a pixel office",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "daemon": "npm run daemon -w @agentfloor/daemon --",
-    "sandbox": "npm run sandbox -w @agentfloor/daemon --"
+    "sandbox": "npm run sandbox -w @agentfloor/daemon --",
+    "db:push": "supabase db push",
+    "db:check": "node supabase/tests/run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "supabase": "^2.121.0",
     "typescript": "^7.0.2"
   }
 }

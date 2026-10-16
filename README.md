@@ -7,9 +7,20 @@ Run a company of AI agents from a pixel office. This repo is a monorepo
 | --- | --- |
 | `packages/daemon` | The office daemon: protocol, agent runtimes, model gateway, CEO console. The prototype, and what runs in each office VM. |
 | `packages/shared` | Types and catalogs shared by the daemon, the Control API and the web app |
+| `supabase/` | Database schema (migrations), row-level security and its check |
 | `apps/web`, `apps/api` | Coming in M0–M1 (see Linear project "AgentFloor") |
 
 Run commands from the repo root; `.env` lives at the root too.
+
+## Database (Supabase)
+
+```bash
+npm run db:push    # apply new migrations in supabase/migrations to the linked project
+npm run db:check   # check row-level security on the real project (rolls itself back)
+```
+
+Browsers only read, and only their own office's rows. Every write goes through
+the Control API with the service role.
 
 ## The office daemon (prototype)
 
