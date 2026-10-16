@@ -31,7 +31,8 @@ if (external.length) {
   console.log(`  External (start their CLI yourself after: source ${values.data}/agents/<id>/env):`);
   for (const a of external) console.log(`    ${a.id} (${a.runtime})`);
 }
-console.log(`  CEO token for scripts: ${running.auth.tokenFor(CEO)}\n`);
+// Only for local use: in an office machine the log is no place for a token.
+if (!link) console.log(`  CEO token for scripts: ${running.auth.tokenFor(CEO)}\n`);
 
 const shutdown = async () => {
   await running.close();
