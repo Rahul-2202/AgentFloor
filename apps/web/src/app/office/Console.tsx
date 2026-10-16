@@ -13,6 +13,8 @@ import {
   githubRepos,
   githubStatus,
   mergePr,
+  adaBriefing,
+  answerPermission,
   officeCall,
   releaseAgent,
   requestChanges,
@@ -24,18 +26,25 @@ import {
 } from "@/lib/api";
 import { useLive } from "@/lib/live";
 import { useOfficeData, type AgentRow, type OfficeData, type TaskRow } from "@/lib/office-data";
+import { AdaPanel } from "./Ada";
+import { Audit } from "./Audit";
+import { Meetings } from "./Meetings";
+import { Memory } from "./Memory";
 import { ReadbackDialog } from "./Readback";
+import { Rules } from "./Rules";
 
-const TABS = ["Team", "Work", "Conversations", "Inbox", "Setup", "Spend"] as const;
+const TABS = ["Team", "Work", "Conversations", "Inbox", "Meetings", "Memory", "Rules", "Setup", "Spend", "Audit"] as const;
 type Tab = (typeof TABS)[number];
 
-export function Console({ officeId, running }: { officeId: string; running: boolean }) {
+export function Console({ officeId, running, onboarded }: { officeId: string; running: boolean; onboarded: boolean }) {
   const data = useOfficeData(officeId);
   const live = useLive(true);
   const [tab, setTab] = useState<Tab>("Team");
   const [agent, setAgent] = useState<string | null>(null);
   const [ops, setOps] = useState<object[] | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // A new office starts with Ada's interview.
+  const [ada, setAda] = useState(!onboarded);
   const openInbox = data.inbox.filter((i) => i.state === "open").length;
 
   const flash = (msg: string) => {
@@ -46,6 +55,9 @@ export function Console({ officeId, running }: { officeId: string; running: bool
 
   return (
     <div className="mt-6">
+      <button onClick={() => setAda(true)} className="fixed bottom-5 right-5 z-30 rounded-full bg-ink px-5 py-3 text-sm font-medium text-white shadow-[var(--shadow-float)]">
+        Ada
+      </button>
       <nav className="flex flex-wrap gap-1 border-b border-line">
         {TABS.map((t) => (
           <button
@@ -70,11 +82,16 @@ export function Console({ officeId, running }: { officeId: string; running: bool
         {tab === "Team" && <Team data={data} live={live} onOpen={setAgent} />}
         {tab === "Work" && <Work data={data} onDone={flash} />}
         {tab === "Conversations" && <Conversations data={data} />}
-        {tab === "Inbox" && <Inbox data={data} onDone={flash} />}
+        {tab === "Inbox" && <Inbox data={data} onDone={flash} change={change} />}
+        {tab === "Meetings" && <Meetings data={data} onDone={flash} />}
+        {tab === "Memory" && <Memory data={data} officeId={officeId} onDone={flash} />}
+        {tab === "Rules" && <Rules data={data} change={change} />}
         {tab === "Setup" && <Setup data={data} change={change} />}
         {tab === "Spend" && <Spend data={data} />}
+        {tab === "Audit" && <Audit data={data} />}
       </div>
 
+      {ada && <AdaPanel officeId={officeId} onboarding={!onboarded} onClose={() => setAda(false)} onDone={flash} />}
       {agent && <AgentPanel data={data} id={agent} live={live} change={change} onClose={() => setAgent(null)} onDone={flash} />}
       {ops && (
         <ReadbackDialog
@@ -411,10 +428,12 @@ function Conversations({ data }: { data: OfficeData }) {
 
 /* ------------------------------------------------------------------ inbox */
 
-function Inbox({ data, onDone }: { data: OfficeData; onDone: (msg: string) => void }) {
+function Inbox({ data, onDone, change }: { data: OfficeData; onDone: (msg: string) => void; change: (ops: object[]) => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const name = (id: string) => (id === "office" ? "Office" : data.agents.find((a) => a.id === id)?.name ?? id);
-  const items = data.inbox.filter((i) => i.state === "open");
+  const name = (id: string) => (id === "office" ? "Office" : id === "ada" ? "Ada" : data.agents.find((a) => a.id === id)?.name ?? id);
+  // Ada's triage: what needs the CEO first.
+  const items = data.inbox.filter((i) => i.state === "open").sort((a, b) => a.priority - b.priority || b.created_at.localeCompare(a.created_at));
+  const PRIORITY: Record<number, string> = { 1: "Needs you first", 2: "Today", 3: "FYI" };
 
   const reply = async (threadId: string, id: string) => {
     const text = answers[id];
@@ -422,19 +441,52 @@ function Inbox({ data, onDone }: { data: OfficeData; onDone: (msg: string) => vo
     await officeCall("ceo_reply", { thread_id: threadId, text, resolves: true }).then(() => onDone("Answered."), (e) => onDone(e.message));
   };
 
-  if (!items.length) return <p className="text-faint">Nothing needs you right now.</p>;
+  if (!items.length)
+    return (
+      <div className="text-faint">
+        Nothing needs you right now.{" "}
+        <button onClick={() => adaBriefing().then(() => onDone("Ada's briefing is in your inbox."), (e) => onDone(e.message))} className="underline">
+          Ask Ada for a briefing
+        </button>
+      </div>
+    );
   return (
     <ul className="space-y-3">
       {items.map((i) => (
         <li key={i.id} className="rounded-2xl bg-surface p-4 shadow-[var(--shadow-card)]">
           <p className="text-xs text-muted">
-            {i.kind} · from {name(i.from)} · {new Date(i.created_at).toLocaleString()}
+            <span className={i.priority === 1 ? "font-medium text-accent" : ""}>{PRIORITY[i.priority] ?? ""}</span> · {i.kind.replaceAll("_", " ")} · from {name(i.from)} ·{" "}
+            {new Date(i.created_at).toLocaleString()}
           </p>
+          {i.ada_note && <p className="mt-1 rounded-lg bg-surface-2 px-2 py-1 text-sm">Ada: {i.ada_note}</p>}
           <p className="mt-1 font-medium">{i.title}</p>
           <p className="mt-1 whitespace-pre-wrap text-sm text-ink-2">{i.body}</p>
+          {i.action?.type === "permission" && (
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => answerPermission(i.id, true).then(() => onDone("Allowed."), (e) => onDone(e.message))} className="rounded-lg bg-ink px-3 py-1.5 text-sm font-medium text-white">
+                {i.action.firstUse ? "Allow from now on" : "Allow once"}
+              </button>
+              <button onClick={() => answerPermission(i.id, false).then(() => onDone("Refused."), (e) => onDone(e.message))} className="rounded-lg px-3 py-1.5 text-sm ring-1 ring-line-2">
+                Refuse
+              </button>
+            </div>
+          )}
+          {i.action?.type === "permission_request" && (
+            <button
+              onClick={() => {
+                const a = i.action as { agent: string; permission: string };
+                change([{ op: "set_permission", scope: "agent", id: a.agent, permission: a.permission, level: "free" }]);
+                void resolveInbox(i.id);
+              }}
+              className="mt-3 rounded-lg bg-ink px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Grant (review the change)…
+            </button>
+          )}
+          {i.kind === "meeting_request" && <p className="mt-2 text-sm text-muted">Ada books it or answers; see Meetings.</p>}
           {i.kind === "approval" && i.action?.type === "merge" ? (
             <MergeApproval pr={i.action.pr} inboxId={i.id} onDone={onDone} />
-          ) : i.thread_id && (
+          ) : i.thread_id && i.kind !== "permission" && (
             <div className="mt-3 flex gap-2">
               <input
                 value={answers[i.id] ?? ""}

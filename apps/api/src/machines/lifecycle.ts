@@ -2,6 +2,7 @@ import { newOfficeToken } from "@agentfloor/shared/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LinkStore } from "../link/store.ts";
 import type { Cloud } from "./cloud.ts";
+import type { CodeBundle } from "./code.ts";
 
 /** Where the office VM's id and state are kept (offices table). */
 export interface MachineStore {
@@ -48,6 +49,8 @@ export interface MachineOptions {
   /** After resuming, how long to wait for a still-running daemon to reconnect before starting a new one. */
   resumeGraceMs?: number;
   touchEveryMs?: number;
+  /** The daemon code machines should run; they're brought up to it on start. */
+  code?: CodeBundle;
   log?: (msg: string) => void;
 }
 
@@ -144,6 +147,7 @@ export class OfficeMachines {
         log(`office ${officeId}: created VM ${id}`);
         await this.o.machines.set(officeId, { sandboxId: id, state: "starting" });
         m = { sandboxId: id, state: "starting" };
+        await this.ensureCode(id);
         await this.startDaemon(id);
       } else {
         const state = normalize(await this.o.cloud.state(m.sandboxId));
@@ -154,11 +158,20 @@ export class OfficeMachines {
           await this.o.cloud.start(m.sandboxId);
           log(`office ${officeId}: resumed VM from ${state}`);
         }
+        // Older code: bring it up to date (the office's data stays), then restart the daemon.
+        let restarted = false;
+        if (await this.ensureCode(m.sandboxId)) {
+          since = Date.now();
+          await this.startDaemon(m.sandboxId);
+          restarted = true;
+        }
         // A resumed pause keeps the daemon running (give it a moment to reconnect);
         // after a stop, or if it's gone, it has to be started again.
-        const resumed = state === "paused" || state === "pausing";
-        const back = resumed ? await this.waitForDaemon(officeId, since, this.o.resumeGraceMs ?? 15_000) : (this.o.connectedSince(officeId) ?? -1) >= since;
-        if (!back) await this.startDaemon(m.sandboxId);
+        if (!restarted) {
+          const resumed = state === "paused" || state === "pausing";
+          const back = resumed ? await this.waitForDaemon(officeId, since, this.o.resumeGraceMs ?? 15_000) : (this.o.connectedSince(officeId) ?? -1) >= since;
+          if (!back) await this.startDaemon(m.sandboxId);
+        }
       }
       if (!(await this.waitForDaemon(officeId, since, this.o.connectTimeoutMs ?? 60_000))) {
         throw new Error("the office started but its daemon didn't connect");
@@ -171,6 +184,24 @@ export class OfficeMachines {
       await this.o.machines.set(officeId, { state: "error", error: message }).catch(() => {});
       throw err;
     }
+  }
+
+  /** Uploads this API's daemon code into the machine if it runs another version. True if it did. */
+  private async ensureCode(sandboxId: string): Promise<boolean> {
+    const code = this.o.code;
+    if (!code) return false;
+    const app = this.o.appDir ?? "/opt/agentfloor";
+    const have = (await this.o.cloud.exec(sandboxId, `cat ${app}/.code-version 2>/dev/null || true`)).output.trim();
+    if (have === code.version) return false;
+    (this.o.log ?? (() => {}))(`machine ${sandboxId}: updating the office code (${have || "unknown"} → ${code.version})`);
+    await this.o.cloud.upload(sandboxId, code.files.map((f) => ({ path: `${app.replace(/^~\//, "")}/${f.path}`, content: f.content })));
+    const r = await this.o.cloud.exec(
+      sandboxId,
+      `export PATH="$HOME/.local/bin:$PATH"; cd ${app} && npm ci -w @agentfloor/daemon --omit=dev --no-audit --no-fund > /tmp/agentfloor-npm.log 2>&1 && echo ${code.version} > .code-version`,
+      600,
+    );
+    if (r.exitCode !== 0) throw new Error(`couldn't update the office code (npm ci failed: ${(await this.o.cloud.exec(sandboxId, "tail -5 /tmp/agentfloor-npm.log")).output.trim()})`);
+    return true;
   }
 
   private async startDaemon(sandboxId: string): Promise<void> {

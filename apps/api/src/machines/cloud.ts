@@ -20,7 +20,9 @@ export interface Cloud {
   touch(id: string): Promise<void>;
   /** Runs a command in the background (survives this call), in a named session. */
   runInBackground(id: string, session: string, command: string): Promise<void>;
-  exec(id: string, command: string): Promise<{ exitCode: number; output: string }>;
+  exec(id: string, command: string, timeoutSec?: number): Promise<{ exitCode: number; output: string }>;
+  /** Writes files into the machine (paths absolute, or relative to the machine user's home). */
+  upload(id: string, files: { path: string; content: Buffer }[]): Promise<void>;
   /** A real terminal in the machine (for "take over"). */
   openTerminal(id: string, o: { cwd: string; cols: number; rows: number; onData: (text: string) => void; onExit: () => void }): Promise<Terminal>;
 }
@@ -93,9 +95,13 @@ export function daytonaCloud(apiKey: string): Cloud {
         },
       };
     },
-    async exec(id, command) {
-      const res = await (await get(id)).process.executeCommand(command, undefined, undefined, 120);
+    async exec(id, command, timeoutSec = 120) {
+      const res = await (await get(id)).process.executeCommand(command, undefined, undefined, timeoutSec);
       return { exitCode: res.exitCode, output: res.result };
+    },
+    async upload(id, files) {
+      const sandbox = await get(id);
+      await sandbox.fs.uploadFiles(files.map((f) => ({ source: f.content, destination: f.path })));
     },
   };
 }

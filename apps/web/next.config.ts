@@ -5,6 +5,8 @@ import { existsSync } from "node:fs";
 if (existsSync("../../.env")) process.loadEnvFile("../../.env");
 
 const nextConfig: NextConfig = {
+  // Shared types and rule labels come straight from the monorepo's TypeScript.
+  transpilePackages: ["@agentfloor/shared"],
   cacheComponents: true,
   partialPrefetching: true,
   // Browser-visible settings, baked in at build time. The same names as the API's

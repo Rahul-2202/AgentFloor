@@ -70,7 +70,58 @@ export interface InboxRow {
   body: string;
   state: string;
   created_at: string;
-  action: { type: "merge"; pr: number; url: string; repo: string } | null;
+  action: InboxAction | null;
+  priority: number;
+  ada_note: string | null;
+}
+
+export type InboxAction =
+  | { type: "merge"; pr: number; url: string; repo: string }
+  | { type: "permission"; agent: string; permission: string; detail: string; firstUse: boolean }
+  | { type: "permission_request"; agent: string; permission: string; why: string }
+  | { type: "meeting"; topic: string; why: string; attendees: string[]; options?: string[] };
+
+export interface MemoryRow {
+  id: string;
+  layer: string;
+  scope_id: string;
+  type: string;
+  title: string;
+  body: string;
+  owner: string;
+  status: string;
+  tags: string[];
+  confidence: number | null;
+  version: number;
+  source: { by?: string; threadId?: string; meetingId?: string; participants?: string[] };
+  updated_at: string;
+}
+export interface MeetingRow {
+  id: string;
+  title: string;
+  requested_by: string;
+  chair: string;
+  attendees: string[];
+  agenda: string[];
+  pre_read: string | null;
+  thread_id: string | null;
+  state: string;
+  created_at: string;
+}
+export interface AuditRow {
+  id: number;
+  actor: string;
+  action: string;
+  target: string | null;
+  detail: Record<string, unknown>;
+  created_at: string;
+}
+export interface FlagRow {
+  id: string;
+  item_id: string;
+  reasons: string[];
+  flagged_by: string[];
+  state: string;
 }
 
 export interface OfficeData {
@@ -80,10 +131,14 @@ export interface OfficeData {
   threads: ThreadRow[];
   messages: MessageRow[];
   inbox: InboxRow[];
+  memory: MemoryRow[];
+  flags: FlagRow[];
+  meetings: MeetingRow[];
+  audit: AuditRow[];
   loaded: boolean;
 }
 
-const EMPTY: OfficeData = { agents: [], rooms: [], tasks: [], threads: [], messages: [], inbox: [], loaded: false };
+const EMPTY: OfficeData = { agents: [], rooms: [], tasks: [], threads: [], messages: [], inbox: [], memory: [], flags: [], meetings: [], audit: [], loaded: false };
 
 /** How each table is read; Realtime changes reload just that table. */
 const TABLES = {
@@ -93,6 +148,10 @@ const TABLES = {
   threads: (o: string) => supabase.from("threads").select("*").eq("office_id", o).order("updated_at", { ascending: false }).limit(100),
   messages: (o: string) => supabase.from("messages").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(400),
   inbox: (o: string) => supabase.from("inbox_items").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(100),
+  memory: (o: string) => supabase.from("memory_items").select("*").eq("office_id", o).order("updated_at", { ascending: false }).limit(500),
+  flags: (o: string) => supabase.from("memory_flags").select("*").eq("office_id", o).eq("state", "open"),
+  meetings: (o: string) => supabase.from("meetings").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(50),
+  audit: (o: string) => supabase.from("audit_log").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(300),
 } as const;
 const REALTIME: Record<string, keyof typeof TABLES> = {
   agents: "agents",
@@ -101,6 +160,10 @@ const REALTIME: Record<string, keyof typeof TABLES> = {
   threads: "threads",
   messages: "messages",
   inbox_items: "inbox",
+  memory_items: "memory",
+  memory_flags: "flags",
+  meetings: "meetings",
+  audit_log: "audit",
 };
 
 /**

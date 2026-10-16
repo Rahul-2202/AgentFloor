@@ -28,6 +28,9 @@ export default defineRailway((ctx) => {
       GITHUB_APP_SLUG: preserve(),
       GITHUB_APP_PRIVATE_KEY: preserve(),
       GITHUB_WEBHOOK_SECRET: preserve(),
+      // Ada runs on the company's Claude login (claude setup-token); kept as set on Railway.
+      AGENTFLOOR_CLAUDE_TOKEN: preserve(),
+      ADA_MODEL: "haiku",
     },
   });
 

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { loadEnv } from "@agentfloor/shared/env";
 import { agentSdkBrain } from "./ada/brain.ts";
 import { supabaseOfficeData } from "./ada/data.ts";
@@ -11,6 +12,7 @@ import { supabaseConversationSource } from "./memory/office.ts";
 import { supabaseMemoryStore } from "./memory/store.ts";
 import { supabaseLinkStore } from "./link/store.ts";
 import { daytonaCloud } from "./machines/cloud.ts";
+import { daemonBundle } from "./machines/code.ts";
 import { supabaseMachineStore } from "./machines/lifecycle.ts";
 import { serviceClient, supabaseOfficeStore } from "./offices.ts";
 import { supabaseProjectionStore } from "./projection/writer.ts";
@@ -54,6 +56,8 @@ const s = createServices({
         appDir: config.daytona.kind === "vm" ? "~/agentfloor" : "/opt/agentfloor",
         linkUrl: config.daytona.linkUrl,
         claudeSecret: config.daytona.claudeSecret,
+        // The daemon code from this deploy (same repo): office machines are brought up to it on start.
+        code: daemonBundle(fileURLToPath(new URL("../../..", import.meta.url))),
         log,
       }
     : null,

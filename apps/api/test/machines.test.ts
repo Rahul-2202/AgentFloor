@@ -25,6 +25,8 @@ const config = checkConfig({
 });
 
 interface FakeVm {
+  codeVersion?: string;
+  uploaded?: string[];
   state: string;
   env: Record<string, string>;
   secrets: Record<string, string>;
@@ -79,8 +81,19 @@ function fakeCloud() {
         link: { url: v.env.AGENTFLOOR_LINK_URL, token: v.env.AGENTFLOOR_OFFICE_TOKEN },
       });
     },
-    async exec() {
+    async exec(id, command) {
+      const v = vm(id);
+      if (command.startsWith("cat ") && command.includes(".code-version")) return { exitCode: 0, output: v.codeVersion ?? "" };
+      const m = /echo (\w+) > \.code-version/.exec(command);
+      if (m) {
+        calls.push("npm ci");
+        v.codeVersion = m[1];
+      }
       return { exitCode: 0, output: "" };
+    },
+    async upload(id, files) {
+      calls.push(`upload ${files.length}`);
+      vm(id).uploaded = files.map((f) => f.path);
     },
     async openTerminal(_id, o) {
       calls.push("terminal");
@@ -117,7 +130,7 @@ function memoryMachines(): MachineStore & { rows: Map<string, { sandboxId: strin
   };
 }
 
-async function setup(t: any, opts: { linkUrl?: string; kind?: "vm" | "container" } = {}) {
+async function setup(t: any, opts: { linkUrl?: string; kind?: "vm" | "container"; code?: { version: string; files: { path: string; content: Buffer }[] } } = {}) {
   const officeId = randomUUID();
   const link = memoryLinkStore();
   const hub = new OfficeHub(link);
@@ -148,6 +161,7 @@ async function setup(t: any, opts: { linkUrl?: string; kind?: "vm" | "container"
     linkUrl: opts.linkUrl ?? `ws://127.0.0.1:${port}${LINK_PATH}`,
     claudeSecret: "agentfloor-claude-token",
     kind: opts.kind ?? "vm",
+    code: opts.code,
     connectTimeoutMs: 3000,
     resumeGraceMs: 500,
     touchEveryMs: 60_000,
@@ -264,4 +278,24 @@ test("without Daytona configured, starting says so", async (t) => {
   t.after(() => app.close());
   const res = await app.inject({ method: "POST", url: "/office/start", headers: { authorization: "Bearer x" } });
   assert.equal(res.statusCode, 503);
+});
+
+test("a machine on older code is brought up to date on start; its data stays", async (t) => {
+  const code = { version: "v2", files: [{ path: "packages/daemon/package.json", content: Buffer.from("{}") }] };
+  const s = await setup(t, { kind: "container", code });
+  await s.post("/office/start");
+  assert.deepEqual(s.fake.calls, ["create", "upload 1", "npm ci", "daemon"], "a new machine gets the code before its daemon starts");
+  assert.deepEqual(s.fake.vms.get("vm-1")!.uploaded, ["/opt/agentfloor/packages/daemon/package.json"]);
+
+  // Same code: a start does nothing more.
+  s.fake.calls.length = 0;
+  await s.post("/office/start");
+  assert.deepEqual(s.fake.calls, []);
+
+  // A release: the running machine is updated in place and its daemon restarted.
+  code.version = "v3";
+  const res = await s.post("/office/start");
+  assert.equal(res.json().state, "started");
+  assert.deepEqual(s.fake.calls, ["upload 1", "npm ci", "daemon"]);
+  assert.equal(s.fake.vms.get("vm-1")!.codeVersion, "v3");
 });
