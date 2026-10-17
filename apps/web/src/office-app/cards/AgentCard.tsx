@@ -50,7 +50,7 @@ export function AgentCard({ id, summoned, onSendBack, onClose }: { id: string; s
       exit={{ opacity: 0, y: 6, scale: 0.97 }}
       transition={{ type: "spring", stiffness: 380, damping: 30 }}
       data-tour="agent-card"
-      className="my-2 w-[440px] overflow-hidden rounded-[24px] bg-white shadow-[0_24px_60px_-16px_rgba(0,0,0,0.4)] ring-1 ring-black/[0.06]"
+      className="my-2 max-h-[calc(100dvh-110px)] w-[min(440px,calc(100vw-24px))] overflow-y-auto overscroll-contain rounded-[24px] bg-white shadow-[0_24px_60px_-16px_rgba(0,0,0,0.4)] ring-1 ring-black/[0.06]"
     >
       {/* header */}
       <div className="flex items-center gap-3.5 px-5 pb-3.5 pt-4">

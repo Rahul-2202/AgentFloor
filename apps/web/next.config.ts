@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
   // Shared types and rule labels come straight from the monorepo's TypeScript.
   transpilePackages: ["@agentfloor/shared"],
   cacheComponents: true,
+  experimental: {
+    // Railway builds restore .next/cache, and a warm Turbopack cache once served a
+    // stale globals.css (the pixel office's styles went missing). Build clean.
+    turbopackFileSystemCacheForBuild: false,
+  },
   partialPrefetching: true,
   // Browser-visible settings, baked in at build time. The same names as the API's
   // variables work too, so one .env serves both.
