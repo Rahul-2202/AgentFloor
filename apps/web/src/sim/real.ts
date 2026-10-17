@@ -296,12 +296,23 @@ function toEvent(m: MeetingRow): CalEvent {
   };
 }
 
+/**
+ * One message per thing said. The office stores a copy per recipient (a head
+ * speaking in a meeting of four is four rows, milliseconds apart), so copies
+ * from the same sender with the same text close together are one message.
+ */
 function dedup(ms: MessageRow[]): MessageRow[] {
-  const seen = new Set<string>();
+  const last = new Map<string, number>();
   return ms
-    .slice()
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .filter((m) => (seen.has(`${m.from}|${m.body}|${m.created_at}`) ? false : (seen.add(`${m.from}|${m.body}|${m.created_at}`), true)));
+    .map((m) => ({ m, at: Date.parse(m.created_at) }))
+    .sort((a, b) => a.at - b.at)
+    .filter(({ m, at }) => {
+      const key = `${m.from}|${m.body}`;
+      const prev = last.get(key);
+      last.set(key, at);
+      return prev === undefined || at - prev > 10_000;
+    })
+    .map(({ m }) => m);
 }
 
 function toConversations(threads: ThreadRow[], messages: MessageRow[], layout: Layout, agents: { id: string; room: string }[]): Conversation[] {
