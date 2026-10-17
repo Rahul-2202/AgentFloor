@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { writeMemory } from "@/lib/api";
+import { downloadMemory, writeMemory } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { useSim } from "@/sim/store";
 import type { MemItem } from "@/sim/types";
@@ -11,7 +11,7 @@ import { MemCard } from "../windows/MemoryWindow";
 type Tab = "company" | "ceo" | "decisions" | "rooms" | "agents";
 
 export function MemoryPanel({ initial }: { initial?: string }) {
-  const { s } = useSim();
+  const { s, act } = useSim();
   const target = s.memory.find((m) => m.id === initial);
   const [tab, setTab] = useState<Tab>(target ? (target.layer.startsWith("agent") ? "agents" : target.layer.startsWith("room") ? "rooms" : target.layer === "ceo" ? "ceo" : "company") : ((initial as Tab) ?? "company"));
   const [q, setQ] = useState("");
@@ -71,7 +71,16 @@ export function MemoryPanel({ initial }: { initial?: string }) {
             ? "Every decision links to the meeting or message it came from. Old ones are superseded, never deleted."
             : "Memory distills up from conversations and is derived down to rooms and agents. You can edit anything."}
       </div>
-      <NewItem />
+      <div className="flex items-center justify-between gap-2">
+        <NewItem />
+        <button
+          onClick={() => downloadMemory().catch((e) => act.toast((e as Error).message))}
+          className="shrink-0 self-start text-[12.5px] font-semibold text-muted hover:text-ink"
+          title="Everything the office remembers, as a JSON file"
+        >
+          Export ↓
+        </button>
+      </div>
       {list.length ? (
         <div className="flex flex-col gap-2">
           {list.map((m) => (

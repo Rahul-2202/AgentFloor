@@ -10,7 +10,8 @@ type State =
   | { kind: "loading" }
   | { kind: "signed-out"; error?: string }
   | { kind: "office"; session: Session; office: Office }
-  | { kind: "error"; session: Session; error: string };
+  | { kind: "error"; session: Session; error: string }
+  | { kind: "not-allowed"; session: Session; error: string };
 
 export default function Home() {
   const [state, setState] = useState<State>({ kind: "loading" });
@@ -27,6 +28,10 @@ export default function Home() {
         if ((err as { status?: number }).status === 401) {
           await supabase.auth.signOut();
           if (!cancelled) setState({ kind: "signed-out", error: "Please sign in again." });
+          return;
+        }
+        if ((err as { code?: string }).code === "not_allowed") {
+          if (!cancelled) setState({ kind: "not-allowed", session, error: (err as Error).message });
           return;
         }
         if (!cancelled) setState({ kind: "error", session, error: (err as Error).message });
@@ -67,6 +72,15 @@ export default function Home() {
             </button>
             {state.error && <p className="mt-3 text-sm text-bad">{state.error}</p>}
           </>
+        )}
+
+        {state.kind === "not-allowed" && (
+          <div className="mt-8 space-y-3">
+            <p className="text-sm text-ink-2">{state.error}</p>
+            <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
+              Sign out
+            </button>
+          </div>
         )}
 
         {state.kind === "error" && (

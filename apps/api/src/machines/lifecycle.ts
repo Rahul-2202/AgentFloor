@@ -21,8 +21,14 @@ export function supabaseMachineStore(db: SupabaseClient): MachineStore {
     async set(officeId, p) {
       const row: Record<string, unknown> = { sandbox_state: p.state, sandbox_error: p.error ?? null };
       if (p.sandboxId !== undefined) row.sandbox_id = p.sandboxId;
-      const { error } = await db.from("offices").update(row).eq("id", officeId);
+      const { data, error } = await db.from("offices").update(row).eq("id", officeId).select("sandbox_id").single();
       if (error) throw new Error(`saving office machine: ${error.message}`);
+      // Machine runs (for cost): one opens when the machine is on, and closes when it isn't.
+      if (p.state === "started" && data?.sandbox_id) {
+        await db.from("machine_runs").insert({ office_id: officeId, sandbox_id: data.sandbox_id }); // already open: the unique index refuses it
+      } else if (!["starting", "creating", "started"].includes(p.state)) {
+        await db.from("machine_runs").update({ stopped_at: new Date().toISOString() }).eq("office_id", officeId).is("stopped_at", null);
+      }
     },
   };
 }

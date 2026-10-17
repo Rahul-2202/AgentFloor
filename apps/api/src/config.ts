@@ -30,6 +30,10 @@ const schema = z.object({
   AGENTFLOOR_CLAUDE_TOKEN: z.string().optional(),
   ADA_MODEL: z.string().default("haiku"),
   ADA_EFFORT: z.enum(["low", "medium", "high"]).default("low"),
+  /** Linear (office tasks ↔ issues). Without a key, Linear features are off. */
+  LINEAR_API_KEY: z.string().optional(),
+  /** This API's public address (webhooks). Railway gives RAILWAY_PUBLIC_DOMAIN. */
+  PUBLIC_API_URL: z.string().optional(),
   /** Hour of the day (UTC) for Ada's daily briefing. */
   BRIEFING_HOUR_UTC: z.coerce.number().int().min(0).max(23).default(7),
 });
@@ -45,6 +49,9 @@ export interface Config {
   daytona: { apiKey: string; snapshot: string; kind: "container" | "vm"; claudeSecret: string; linkUrl: string } | null;
   github: { appId: string; slug: string; privateKey: string; webhookSecret: string } | null;
   ada: { token: string; model: string; effort: "low" | "medium" | "high"; briefingHourUtc: number } | null;
+  linear: { apiKey: string } | null;
+  /** The API's public https address, when it has one. */
+  publicUrl: string | null;
 }
 
 /** Reads and checks the environment; throws one error naming every missing or bad variable. */
@@ -67,6 +74,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     daytona: daytonaConfig(e),
     github: githubConfig(e),
     ada: e.AGENTFLOOR_CLAUDE_TOKEN ? { token: e.AGENTFLOOR_CLAUDE_TOKEN, model: e.ADA_MODEL, effort: e.ADA_EFFORT, briefingHourUtc: e.BRIEFING_HOUR_UTC } : null,
+    linear: e.LINEAR_API_KEY ? { apiKey: e.LINEAR_API_KEY } : null,
+    publicUrl: (e.PUBLIC_API_URL ?? (e.RAILWAY_PUBLIC_DOMAIN ? `https://${e.RAILWAY_PUBLIC_DOMAIN}` : null))?.replace(/\/$/, "") ?? null,
   };
 }
 

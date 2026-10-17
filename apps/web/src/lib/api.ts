@@ -11,10 +11,12 @@ export interface Office {
 export class ApiError extends Error {
   readonly status: number;
   readonly problems: string[];
-  constructor(status: number, message: string, problems: string[]) {
+  readonly code: string | undefined;
+  constructor(status: number, message: string, problems: string[], code?: string) {
     super(message);
     this.status = status;
     this.problems = problems;
+    this.code = code;
   }
 }
 
@@ -29,7 +31,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error ?? res.statusText, body.problems ?? []);
+    throw new ApiError(res.status, body.error ?? res.statusText, body.problems ?? [], body.code);
   }
   return res.json() as Promise<T>;
 }
@@ -178,3 +180,86 @@ export const acceptMemory = (id: string) => post<unknown>(`/office/memory/${id}/
 export const rejectMemory = (id: string, why: string) => post<unknown>(`/office/memory/${id}/reject`, { why });
 
 export const answerPermission = (inboxId: string, allow: boolean, note?: string) => post<unknown>(`/office/permissions/${encodeURIComponent(inboxId)}`, { allow, note });
+
+/* ------------------------------------------------------------------ Linear */
+
+export interface LinearStatus {
+  configured: boolean;
+  link?: { teamId: string; teamKey: string; teamName: string; projectUrl: string | null; webhookId: string | null } | null;
+  teams?: { id: string; key: string; name: string }[];
+}
+export const linearStatus = () => api<LinearStatus>("/office/linear");
+export const linearConnect = (teamId: string) => post<{ link: NonNullable<LinearStatus["link"]> & { warning?: string } }>("/office/linear/connect", { teamId });
+export const linearDisconnect = () => post<unknown>("/office/linear/disconnect", {});
+
+/* -------------------------------------------------------------------- ops */
+
+export const getMe = () => api<{ user: { githubLogin: string | null }; admin: boolean }>("/me");
+
+/** Reports a browser error (best effort, never throws). */
+export async function reportError(message: string, stack?: string, context?: object) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return;
+    await fetch(`${process.env.NEXT_PUBLIC_API_URL}/errors`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${data.session.access_token}`, "content-type": "application/json" },
+      body: JSON.stringify({ message, stack, context }),
+      keepalive: true,
+    });
+  } catch {
+    /* reporting must never break the page */
+  }
+}
+
+/** Downloads everything the office remembers as a JSON file. */
+export async function downloadMemory() {
+  const { data } = await supabase.auth.getSession();
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/office/memory/export`, { headers: { authorization: `Bearer ${data.session?.access_token}` } });
+  if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error ?? res.statusText, []);
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement("a"), { href: url, download: `agentfloor-memory-${new Date().toISOString().slice(0, 10)}.json` });
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export interface AdminOverview {
+  offices: {
+    id: string;
+    name: string;
+    owner: string | null;
+    createdAt: string;
+    onboarded: boolean;
+    machine: string;
+    connected: boolean;
+    seenAt: string | null;
+    spend: { today: number; week: number; month: number };
+    machineHours: { week: number; month: number };
+    errors24h: number;
+  }[];
+  totals: { offices: number; running: number; spend: { today: number; week: number; month: number }; machineHours: { week: number; month: number }; errors24h: number };
+}
+export interface AdminError {
+  id: number;
+  source: "web" | "api" | "office";
+  office_id: string | null;
+  message: string;
+  stack: string | null;
+  context: Record<string, unknown>;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+}
+export interface AllowEntry {
+  id: number;
+  githubLogin: string | null;
+  email: string | null;
+  note: string | null;
+  admin: boolean;
+}
+export const adminOverview = () => api<AdminOverview>("/admin/overview");
+export const adminErrors = () => api<{ errors: AdminError[] }>("/admin/errors?limit=150");
+export const adminAllowlist = () => api<{ entries: AllowEntry[] }>("/admin/allowlist");
+export const adminAllow = (e: { githubLogin?: string; email?: string; note?: string; admin?: boolean }) => post<{ entries: AllowEntry[] }>("/admin/allowlist", e);
+export const adminDisallow = (id: number) => api<{ entries: AllowEntry[] }>(`/admin/allowlist/${id}`, { method: "DELETE" });
+export const adminBackup = () => post<{ offices: number }>("/admin/backup", {});

@@ -199,6 +199,16 @@ export class OfficeLink {
     }
   }
 
+  private reported: number[] = [];
+  /** Reports a problem to the API (at most 30 a minute; dropped while offline). */
+  report(level: "error" | "warn", message: string): void {
+    const now = Date.now();
+    this.reported = this.reported.filter((t) => now - t < 60_000);
+    if (this.reported.length >= 30 || this.state !== "open") return;
+    this.reported.push(now);
+    this.send({ t: "log", level, message: message.slice(0, 2000) });
+  }
+
   private send(msg: DaemonMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }

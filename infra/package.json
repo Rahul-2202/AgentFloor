@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "snapshot": "node build-office-snapshot.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "live-check": "node live-check.ts"
   },
   "dependencies": {
     "@agentfloor/shared": "*",

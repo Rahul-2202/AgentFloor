@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogoMark } from "@/components/Logo";
 import { CAST, ROOMS } from "@/office/layout";
+import { getMe } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { clockLabel, useSim } from "@/sim/store";
 import type { RoomId } from "@/office/types";
@@ -131,6 +132,10 @@ function Machine() {
 export function TopBar() {
   const { s } = useSim();
   const ui = useUI();
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    void getMe().then((m) => setAdmin(m.admin), () => {});
+  }, []);
   const open = s.inbox.filter((i) => !i.resolved);
   const badge: Partial<Record<PanelKey, number>> = {
     inbox: open.filter((i) => !i.batched).length,
@@ -151,6 +156,11 @@ export function TopBar() {
         <div className="hidden 2xl:block">
           <Jump />
         </div>
+        {admin && (
+          <Link href="/admin" className="hidden rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-faint hover:bg-black/5 hover:text-ink xl:block">
+            Admin
+          </Link>
+        )}
         <button onClick={() => void supabase.auth.signOut()} className="hidden rounded-full px-2.5 py-1.5 text-[11.5px] font-medium text-faint hover:bg-black/5 hover:text-ink xl:block">
           Sign out
         </button>

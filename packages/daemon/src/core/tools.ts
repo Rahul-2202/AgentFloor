@@ -175,6 +175,25 @@ export const TOOLS: ToolSpec[] = [
   },
 
   {
+    name: "ticket_create",
+    who: "agent",
+    description:
+      "Create a Linear ticket in the office's Linear team (a bug you found, follow-up work). Your own tasks already have tickets: you don't need to create those.",
+    shape: { title: z.string(), description: z.string().optional(), task_id: z.string().optional().describe("The office task it relates to.") },
+    run: (o, me, a) => o.ticket(me, { op: "create", title: a.title, description: a.description, taskId: a.task_id }),
+  },
+  {
+    name: "ticket_update",
+    who: "agent",
+    description: "Move a Linear ticket (by its identifier, like ENG-12) or comment on it. Closing or cancelling a ticket needs the close_tickets permission.",
+    shape: {
+      ticket: z.string(),
+      status: z.enum(["todo", "in_progress", "in_review", "done", "canceled"]).optional(),
+      comment: z.string().optional(),
+    },
+    run: (o, me, a) => o.ticket(me, { op: "update", ticket: a.ticket, status: a.status, comment: a.comment }),
+  },
+  {
     name: "open_pr",
     who: "agent",
     description:
@@ -399,6 +418,13 @@ export const TOOLS: ToolSpec[] = [
     description: "An agent's recent live session lines, for opening its terminal.",
     shape: { agent: z.string() },
     run: (o, _me, a) => o.outputOf(a.agent),
+  },
+  {
+    name: "ceo_update_task",
+    who: "ceo",
+    description: "Change a task's status or add a note (from the CEO, or a Linear change the CEO made).",
+    shape: { task_id: z.string(), status: z.enum(["queued", "ongoing", "blocked", "review", "done"]).optional(), note: z.string().optional() },
+    run: (o, _me, a) => o.updateTask(CEO, { taskId: a.task_id, status: a.status, note: a.note }),
   },
   {
     name: "agent_files",

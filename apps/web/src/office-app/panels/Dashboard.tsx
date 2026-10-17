@@ -18,6 +18,7 @@ function TaskRow({ t }: { t: Task }) {
           <div className="flex items-center gap-1.5">
             <span className="font-mono text-[10.5px] text-faint">{t.key}</span>
             {t.priority === "P1" && <span className="rounded bg-[#fdecea] px-1 text-[9.5px] font-bold text-[#9b2c24]">P1</span>}
+            {t.linear && <span className="font-mono text-[10.5px] text-[#4a55a8]">{t.linear.identifier}</span>}
             <span className="ml-auto">
               <StateChip state={t.state} />
             </span>

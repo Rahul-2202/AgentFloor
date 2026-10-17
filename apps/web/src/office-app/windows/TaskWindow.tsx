@@ -23,7 +23,14 @@ export function TaskWindow({ id }: { id: string }) {
       sub={`${nameOf(t.owner)} · ${ROOM_LABEL[t.room] ?? t.room} · from ${t.source === "you" ? "you" : t.source === "ada" ? "Ada" : nameOf(row?.created_by ?? "")}`}
       footer={
         <div className="flex items-center justify-between gap-2 border-t border-black/[0.06] px-4 py-3">
-          <StateChip state={t.state} />
+          <span className="flex items-center gap-2">
+            <StateChip state={t.state} />
+            {t.linear && (
+              <a href={t.linear.url} target="_blank" rel="noreferrer" className="rounded-full bg-[#eef0fb] px-2 py-[2px] font-mono text-[11px] font-semibold text-[#4a55a8] hover:underline">
+                {t.linear.identifier} ↗
+              </a>
+            )}
+          </span>
           <div className="flex gap-2">
             <Btn onClick={() => ui.openWin({ kind: "chat", id: t.owner, mode: "queue" })}>Message {nameOf(t.owner)}</Btn>
             {t.state !== "done" && (

@@ -15,6 +15,9 @@ import type { OfficeMachines } from "./machines/lifecycle.ts";
 import type { OfficeStore } from "./offices.ts";
 import { PolicyError } from "./policy/engine.ts";
 import type { ClientOp, SetupService } from "./setup/service.ts";
+import { LinearUserError, type LinearSync } from "./linear/service.ts";
+import type { Access, AdminData, ErrorLog } from "./ops/ops.ts";
+import { LinearError } from "./linear/client.ts";
 import { StaleSetupError } from "./setup/store.ts";
 
 export interface Deps {
@@ -28,6 +31,7 @@ export interface Deps {
   spend?: BudgetStore;
   watchers?: Watchers;
   github?: GitHubService | null;
+  linear?: LinearSync | null;
   ada?: Ada | null;
   meetings?: Meetings | null;
   memory?: MemoryService | null;
@@ -39,12 +43,18 @@ export interface Deps {
   officeForRepo?: (fullName: string) => Promise<string | null>;
   /** Inbox items the API itself raised (budgets) are resolved here, not in the daemon. */
   resolveOwnInbox?: (officeId: string, id: string) => Promise<void>;
+  /** Who may sign in (the allowlist); without it, anyone signed in may (tests, local). */
+  access?: Access;
+  errors?: ErrorLog;
+  admin?: AdminData;
+  /** Runs the memory backup now (admins). */
+  backup?: () => Promise<object>;
   webOrigins: string[];
   logger?: boolean;
 }
 
 /** Office calls the browser can't make through /office/call: setup goes through the policy engine; holds are the API's. */
-const BLOCKED_CALLS = new Set(["ceo_configure_agent", "ceo_hold_agent", "ceo_release_agent", "ceo_start_meeting", "ceo_end_meeting"]);
+const BLOCKED_CALLS = new Set(["ceo_configure_agent", "ceo_release_agent", "ceo_start_meeting", "ceo_end_meeting"]);
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -59,6 +69,14 @@ export async function buildApp(deps: Deps) {
   await app.register(websocket, { options: { maxPayload: 4 * 1024 * 1024 } });
 
   app.get("/health", async () => ({ ok: true }));
+
+  // Server errors are tracked (grouped by message), not just logged.
+  app.setErrorHandler((err: Error & { statusCode?: number }, req, reply) => {
+    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+    if (status >= 500) deps.errors?.record("api", err.message, { stack: err.stack, context: { method: req.method, url: req.url.split("?")[0] } });
+    req.log?.error?.(err);
+    void reply.code(status).send({ error: status >= 500 ? "Something went wrong on our side. It's been recorded." : err.message });
+  });
 
   // Office daemons dial in here; they authenticate with their office token
   // in the first message (see packages/shared/src/link.ts).
@@ -88,6 +106,13 @@ export async function buildApp(deps: Deps) {
       }
       return reply.code(202).send({ ok: true });
     });
+
+    // Linear's webhook, one address per office, signed with that office's secret.
+    hooks.post<{ Params: { office: string } }>("/linear/webhook/:office", async (req, reply) => {
+      if (!deps.linear) return reply.code(404).send({ error: "Linear isn't set up" });
+      const ok = await deps.linear.webhook(req.params.office, req.body as Buffer, req.headers["linear-signature"] as string | undefined);
+      return ok ? reply.code(200).send({ ok: true }) : reply.code(401).send({ error: "bad signature" });
+    });
   });
 
   // Everything below needs a signed-in user (a Supabase access token).
@@ -102,10 +127,73 @@ export async function buildApp(deps: Deps) {
         if (err instanceof AuthError) return reply.code(401).send({ error: "session expired or invalid" });
         throw err;
       }
+      // Internal v1: only people on the allowlist.
+      if (deps.access) {
+        const a = await deps.access.check(req.user);
+        if (!a.allowed) {
+          return reply.code(403).send({ error: `AgentFloor is invite-only for now. Ask to have ${req.user.githubLogin ?? req.user.email ?? "your account"} added.`, code: "not_allowed" });
+        }
+        (req as FastifyRequest & { admin?: boolean }).admin = a.admin;
+      }
+    });
+    const isAdmin = (req: FastifyRequest) => !deps.access || !!(req as FastifyRequest & { admin?: boolean }).admin;
+
+    /** Errors in the browser (the web app reports them here). */
+    authed.post<{ Body: { message?: string; stack?: string; context?: object } }>("/errors", async (req) => {
+      if (deps.errors && req.body?.message) {
+        const office = await deps.offices.officeOf(req.user.id).catch(() => null);
+        deps.errors.record("web", String(req.body.message).slice(0, 2000), { stack: req.body.stack?.slice(0, 8000), officeId: office?.id ?? null, context: { ...(req.body.context ?? {}), user: req.user.githubLogin } });
+      }
+      return { ok: true };
+    });
+
+    /** Everything the office remembers, as a file (the CEO's own backup). */
+    authed.get("/office/memory/export", async (req, reply) => {
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office || !deps.admin) return reply.code(404).send({ error: "no office yet" });
+      reply.header("content-disposition", `attachment; filename="agentfloor-memory-${new Date().toISOString().slice(0, 10)}.json"`);
+      return deps.admin.memoryExport(office.id);
+    });
+
+    /* -------------------------------------------------------------- admin */
+
+    authed.get("/admin/overview", async (req, reply) => {
+      if (!isAdmin(req) || !deps.admin) return reply.code(403).send({ error: "admins only" });
+      return deps.admin.overview();
+    });
+    authed.get<{ Querystring: { limit?: string } }>("/admin/errors", async (req, reply) => {
+      if (!isAdmin(req) || !deps.admin) return reply.code(403).send({ error: "admins only" });
+      return { errors: await deps.admin.errors(Math.min(500, Number(req.query.limit ?? 100) || 100)) };
+    });
+    authed.get("/admin/allowlist", async (req, reply) => {
+      if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
+      return { entries: await deps.access.list() };
+    });
+    authed.post<{ Body: { githubLogin?: string; email?: string; note?: string; admin?: boolean } }>("/admin/allowlist", async (req, reply) => {
+      if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
+      try {
+        await deps.access.add({ githubLogin: req.body?.githubLogin?.trim(), email: req.body?.email?.trim(), note: req.body?.note, admin: req.body?.admin });
+        return { entries: await deps.access.list() };
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
+    });
+    authed.delete<{ Params: { id: string } }>("/admin/allowlist/:id", async (req, reply) => {
+      if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
+      const entries = await deps.access.list();
+      const target = entries.find((e) => e.id === Number(req.params.id));
+      // Never lock the last admin out.
+      if (target?.admin && entries.filter((e) => e.admin).length <= 1) return reply.code(400).send({ error: "That's the last admin." });
+      await deps.access.remove(Number(req.params.id));
+      return { entries: await deps.access.list() };
+    });
+    authed.post("/admin/backup", async (req, reply) => {
+      if (!isAdmin(req) || !deps.backup) return reply.code(403).send({ error: "admins only" });
+      return deps.backup();
     });
 
     /** Who is signed in, and their office if it exists yet. */
-    authed.get("/me", async (req) => ({ user: req.user, office: await deps.offices.officeOf(req.user.id) }));
+    authed.get("/me", async (req) => ({ user: req.user, admin: isAdmin(req) && !!deps.access, office: await deps.offices.officeOf(req.user.id) }));
 
     /** First sign-in: create the user's office. Safe to call again. */
     authed.post("/office", async (req, reply) => {
@@ -227,6 +315,41 @@ export async function buildApp(deps: Deps) {
         if (err instanceof LinkError) return reply.code(err.code === "office_offline" ? 503 : 400).send({ error: err.message });
         throw err;
       }
+    });
+
+    /* ------------------------------------------------------------- Linear */
+
+    const linearError = (reply: any, err: unknown) => {
+      if (err instanceof LinearUserError) return reply.code(400).send({ error: err.message });
+      if (err instanceof LinearError) return reply.code(502).send({ error: err.message });
+      throw err;
+    };
+
+    authed.get("/office/linear", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.linear) return { configured: false };
+      return deps.linear.status(id);
+    });
+
+    authed.post<{ Body: { teamId?: string } }>("/office/linear/connect", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.linear) return reply.code(503).send({ error: "Linear isn't set up on this server yet." });
+      if (!req.body?.teamId) return reply.code(400).send({ error: "teamId is required" });
+      try {
+        return { link: await deps.linear.connect(id, req.body.teamId) };
+      } catch (err) {
+        return linearError(reply, err);
+      }
+    });
+
+    authed.post("/office/linear/disconnect", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.linear) return reply.code(503).send({ error: "Linear isn't set up on this server yet." });
+      await deps.linear.disconnect(id);
+      return { disconnected: true };
     });
 
     /* ------------------------------------------------------------- GitHub */

@@ -68,6 +68,8 @@ function deliverableAt(m: Message, point: DeliveryPoint): boolean {
  * goes through here, where reach rules, budgets, hop limits, delivery timing and
  * escalation are enforced, and everything is logged.
  */
+export type TicketStatus = "todo" | "in_progress" | "in_review" | "done" | "canceled";
+
 export class Office {
   readonly bus = new EventEmitter();
   hooks: OfficeHooks = {};
@@ -874,6 +876,23 @@ export class Office {
     if (task) this.updateTask(agent === task.owner || agent === this.headOf(task.room) ? agent : CEO, { taskId: task.id, output: { kind: "pr", title: `#${pr.number} ${a.title}`, url: pr.url } });
     this.emit("pr.opened", { agent, number: pr.number, url: pr.url, branch, taskId: task?.id ?? null });
     return { ...pr, branch, draft };
+  }
+
+  /**
+   * Linear tickets, through AgentFloor (the office has no Linear key of its own).
+   * Closing or cancelling one is the close_tickets permission.
+   */
+  async ticket(agent: string, a: { op: "create"; title: string; description?: string; taskId?: string } | { op: "update"; ticket: string; status?: TicketStatus; comment?: string }) {
+    const me = this.agent(agent);
+    if (!this.hooks.api) throw new OfficeError("offline", "The office isn't connected to AgentFloor, so it can't reach Linear.");
+    if (a.op === "update" && (a.status === "done" || a.status === "canceled")) {
+      const ok = this.checkPermission(agent, "close_tickets", `${a.status === "done" ? "close" : "cancel"} ticket ${a.ticket}`);
+      if (!ok.allow) throw new OfficeError("permission", ok.reason!);
+    }
+    if (a.op === "create" && a.taskId && !this.store.getTask(a.taskId)) throw new OfficeError("unknown_task", `No task "${a.taskId}".`);
+    const r = await this.hooks.api("linear", { ...a, agent, agentName: me.name });
+    this.emit("ticket.changed", { agent, op: a.op, ...(a.op === "create" ? { title: a.title } : { ticket: a.ticket, status: a.status ?? null }) });
+    return r;
   }
 
   /** Heads ask the CEO to merge a PR. Merging is the CEO's alone (a locked rule): it lands in the inbox. */

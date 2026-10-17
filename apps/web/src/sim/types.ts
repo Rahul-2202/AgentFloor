@@ -30,6 +30,8 @@ export interface Task {
   blocker?: string;
   outputs?: string[];
   subtasks?: { title: string; done: boolean }[];
+  /** Its Linear issue, when the office is connected to Linear. */
+  linear?: { identifier: string; url: string };
 }
 
 export interface AgentLive {
