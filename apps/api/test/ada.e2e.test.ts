@@ -186,10 +186,13 @@ test("triage, a meeting from a head's request, minutes that become memory and ta
   daemon.office.reply("strategist", { threadId, text: "OK if they come in v1.1." });
   await until("the transcript", () => [...tables.messages.values()].filter((x) => x.thread_id === threadId).length >= 3);
 
+  // Ending closes the meeting at once; Ada writes the minutes after.
   const ended = await call("POST", `/office/meetings/${m.id}/end`);
   assert.equal(ended.statusCode, 200, ended.body);
-  assert.match(minutesRun!.prompt, /PM: I recommend shipping without reminders/);
+  assert.equal(ended.json().meeting.state, "ended");
   assert.equal(daemon.office.thread(threadId).state, "resolved");
+  await s.meetings!.minutesWritten(m.id);
+  assert.match(minutesRun!.prompt, /PM: I recommend shipping without reminders/);
   const task = daemon.office.store.tasks().find((x) => x.title === "Write the launch post without reminders")!;
   assert.equal(task.owner, "strategist");
   const decisions = await memory.list(OFFICE, { scopes: [["room", "dev"]], type: "decision" });

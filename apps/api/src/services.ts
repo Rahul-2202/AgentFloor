@@ -75,7 +75,7 @@ export function createServices(o: {
 
   const ada =
     o.ada && memory && o.stores.data ? new Ada({ brain: o.ada.brain, setup, memory, hub, data: o.stores.data, spend: o.stores.budgets }) : null;
-  const meetings = ada && memory && o.stores.data ? new Meetings({ ada, data: o.stores.data, hub, memory, setup }) : null;
+  const meetings = ada && memory && o.stores.data ? new Meetings({ ada, data: o.stores.data, hub, memory, setup, log }) : null;
   // New inbox items get Ada's triage, a little after they arrive (they come in bursts).
   const triageTimers = new Map<string, NodeJS.Timeout>();
   const triageSoon = (id: string) => {

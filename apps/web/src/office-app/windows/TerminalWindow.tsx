@@ -84,6 +84,9 @@ export function TerminalWindow({ id }: { id: string }) {
                 <button onClick={() => ui.openWin({ kind: "chat", id, mode: "now" })} className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white hover:bg-white/20">
                   Message
                 </button>
+                <button onClick={() => ui.openWin({ kind: "files", id })} className="rounded-full bg-white/10 px-3 py-1 font-semibold text-white hover:bg-white/20">
+                  Files
+                </button>
                 <button
                   disabled={s.machine !== "started"}
                   onClick={() => live.takeOver(id)}

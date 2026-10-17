@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Office } from "./office.ts";
+import { listFiles, readTextFile } from "./files.ts";
 import { classify } from "./permissions.ts";
 import { CEO, OfficeError } from "./types.ts";
 
@@ -399,7 +400,28 @@ export const TOOLS: ToolSpec[] = [
     shape: { agent: z.string() },
     run: (o, _me, a) => o.outputOf(a.agent),
   },
+  {
+    name: "agent_files",
+    who: "ceo",
+    description: "The files in an agent's working folder (what it has written), newest first.",
+    shape: { agent: z.string() },
+    run: (o, _me, a) => listFiles(workdirOf(o, a.agent)),
+  },
+  {
+    name: "agent_file",
+    who: "ceo",
+    description: "One text file from an agent's working folder.",
+    shape: { agent: z.string(), path: z.string() },
+    run: (o, _me, a) => readTextFile(workdirOf(o, a.agent), a.path),
+  },
 ];
+
+function workdirOf(o: Office, agent: string): string {
+  o.agent(agent); // throws for an unknown agent
+  const roots = o.hooks.rootsOf?.(agent);
+  if (!roots) throw new OfficeError("offline", "This office can't show agents' files.");
+  return roots.workdir;
+}
 
 export const TOOL_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
 

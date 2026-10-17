@@ -15,6 +15,7 @@ const GROUPS: { t: string; acts: Act[] }[] = [
       { l: "Hire an agent", panel: ["team", "hire"] },
       { l: "Add a room", panel: ["team", "add-room"] },
       { l: "Org chart", panel: ["team"] },
+      { l: "Agents' files", win: { kind: "files", id: "" } },
     ],
   },
   {
