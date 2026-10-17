@@ -135,7 +135,11 @@ export function World() {
   const { s, d } = useSim();
   const ui = useUI();
 
-  const [zoom, setZoom] = useState(2.8);
+  // Zoom: starts with the whole office in view; +/−, pinch or ctrl+scroll zoom in to 4×.
+  const fitZoom = useFitZoom();
+  const [zoomPick, setZoom] = useState<number | null>(null);
+  const zoom = clampZoom(zoomPick ?? fitZoom, fitZoom);
+  const zoomBy = useCallback((k: number) => setZoom((z) => clampZoom((z ?? fitZoom) * k, fitZoom)), [fitZoom]);
   const player = usePlayer(SPOTS["ceo:visitor"], useCallback(() => false, []));
   const meId = s.me;
   const [near, setNear] = useState<string | null>(null);
@@ -162,6 +166,37 @@ export function World() {
   }, [player.walking, panX, panY, recenterCam]);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  /** Looks at another part of the office: the camera can reach every corner of the floor. */
+  const panTo = useCallback(
+    (nx: number, ny: number) => {
+      const [wx, wy] = player.pos();
+      panX.set(Math.max(-wx * TILE, Math.min(WORLD.w * TILE - wx * TILE, nx)));
+      panY.set(Math.max(-wy * TILE, Math.min(WORLD.h * TILE - wy * TILE, ny)));
+      setPanned(true);
+    },
+    [player, panX, panY],
+  );
+  // Trackpad: two-finger scroll looks around, pinch (ctrl+scroll) zooms.
+  const root = useRef<HTMLDivElement>(null);
+  const wheel = useRef({ zoom, panTo, zoomBy });
+  useLayoutEffect(() => {
+    wheel.current = { zoom, panTo, zoomBy };
+  });
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      // Scrolling inside a card or panel scrolls that, not the office.
+      if ((e.target as HTMLElement).closest(".counter, [data-scroll]")) return;
+      e.preventDefault();
+      const w = wheel.current;
+      if (e.ctrlKey || e.metaKey) w.zoomBy(Math.exp(-e.deltaY * 0.01));
+      else w.panTo(panX.get() + e.deltaX / w.zoom, panY.get() + e.deltaY / w.zoom);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [panX, panY]);
+
   const posOf = useCallback((id: string): Pt => spot(s.live[id]?.at ?? "ada:home"), [s.live]);
 
   // Let other parts of the app move the player and summon agents.
@@ -175,6 +210,8 @@ export function World() {
   useLayoutEffect(() => {
     goToRef.current = player.goTo;
     summonRef.current = (id: string) => {
+    // They come to you: look back at yourself so their card opens on screen.
+    recenterCam();
     const [px, py] = player.pos();
     const [ax] = posOf(id);
     const side = ax < px ? -1.3 : 1.3;
@@ -260,12 +297,12 @@ export function World() {
         ui.setCard(near);
       }
       if (e.key === "Escape" && !ui.win && !ui.panel) closeRef.current();
-      if (e.key === "=" || e.key === "+") setZoom((z) => Math.min(4.2, z + 0.4));
-      if (e.key === "-") setZoom((z) => Math.max(1.4, z - 0.4));
+      if (e.key === "=" || e.key === "+") zoomBy(ZOOM_STEP);
+      if (e.key === "-") zoomBy(1 / ZOOM_STEP);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [near, ui]);
+  }, [near, ui, zoomBy]);
 
   const openAgent = (id: string) => {
     const [ax, ay] = posOf(id);
@@ -335,8 +372,9 @@ export function World() {
 
   return (
     <div
+      ref={root}
       className="absolute inset-0"
-      style={{ cursor: grabbing ? "grabbing" : undefined }}
+      style={{ cursor: grabbing ? "grabbing" : "grab" }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         down.current = { x: e.clientX, y: e.clientY, px: panX.get(), py: panY.get() };
@@ -353,13 +391,8 @@ export function World() {
           (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         }
         if (dragged.current) {
-          // Screen pixels → world pixels, keeping the look-around within the world.
-          const [wx, wy] = player.pos();
-          const nx = st.px - dx / zoom;
-          const ny = st.py - dy / zoom;
-          panX.set(Math.max(-wx * TILE, Math.min(WORLD.w * TILE - wx * TILE, nx)));
-          panY.set(Math.max(-wy * TILE, Math.min(WORLD.h * TILE - wy * TILE, ny)));
-          if (!panned) setPanned(true);
+          // Screen pixels → world pixels.
+          panTo(st.px - dx / zoom, st.py - dy / zoom);
         }
       }}
       onPointerUp={() => {
@@ -437,6 +470,7 @@ export function World() {
         py={player.y}
         live={Object.fromEntries(Object.entries(s.live).filter(([id]) => id !== meId))}
         built={["ceo", "meeting", ...Object.keys(s.rooms)]}
+        hidden={!!cardId}
         onGo={(x, y) => player.goTo(x, y)}
       />
 
@@ -454,26 +488,44 @@ export function World() {
         )}
       </AnimatePresence>
 
-      <div data-tour="zoom" className="absolute bottom-4 left-4 z-30 flex flex-col overflow-hidden rounded-[14px] bg-white/90 shadow-[var(--shadow-card)] ring-1 ring-black/[0.06] backdrop-blur md:left-[236px]">
-        <button onClick={() => setZoom((z) => Math.min(4.2, z + 0.4))} className="grid h-9 w-9 place-items-center text-[18px] font-semibold text-ink hover:bg-black/5" aria-label="Zoom in">
+      <div data-tour="zoom" className={`absolute bottom-4 left-4 z-30 flex flex-col overflow-hidden rounded-[14px] bg-white/90 shadow-[var(--shadow-card)] ring-1 ring-black/[0.06] backdrop-blur transition-opacity duration-200 md:left-[236px] ${cardId ? "pointer-events-none opacity-0" : ""}`}>
+        <button onClick={() => zoomBy(ZOOM_STEP)} className="grid h-9 w-9 place-items-center text-[18px] font-semibold text-ink hover:bg-black/5" aria-label="Zoom in">
           +
         </button>
         <div className="h-px bg-black/[0.06]" />
-        <button onClick={() => setZoom((z) => Math.max(1.4, z - 0.4))} className="grid h-9 w-9 place-items-center text-[18px] font-semibold text-ink hover:bg-black/5" aria-label="Zoom out">
+        <button onClick={() => zoomBy(1 / ZOOM_STEP)} className="grid h-9 w-9 place-items-center text-[18px] font-semibold text-ink hover:bg-black/5" aria-label="Zoom out">
           −
         </button>
       </div>
 
       <div className={`pointer-events-none absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-full bg-white/85 transition-opacity duration-300 ${cardId ? "opacity-0" : "opacity-100"} px-3.5 py-1.5 text-[12px] font-medium text-muted shadow-sm ring-1 ring-black/[0.05] backdrop-blur`}>
-        <b className="text-ink-2">WASD / arrows</b> to walk · <b className="text-ink-2">click</b> to go · <b className="text-ink-2">drag</b> to look around · walk up to anyone or press <b className="text-ink-2">E</b> · hover to <b className="text-ink-2">call them</b>
+        <b className="text-ink-2">WASD / arrows</b> to walk · <b className="text-ink-2">click</b> to go · <b className="text-ink-2">drag or scroll</b> to look around · <b className="text-ink-2">pinch or +/−</b> to zoom · walk up to anyone or press <b className="text-ink-2">E</b> · hover to <b className="text-ink-2">call them</b>
       </div>
     </div>
   );
 }
 
+/* -------------------------------------------------------------------- zoom */
+
+const ZOOM_STEP = 1.25;
+const ZOOM_MAX = 4;
+const clampZoom = (z: number, fit: number) => Math.max(fit, Math.min(ZOOM_MAX, z));
+
+/** The zoom that shows the whole office in the window (the most zoomed-out view). */
+function useFitZoom() {
+  const calc = () => Math.min(window.innerWidth / (WORLD.w * TILE), (window.innerHeight - 64) / (WORLD.h * TILE));
+  const [fit, setFit] = useState(calc);
+  useEffect(() => {
+    const on = () => setFit(calc());
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return fit;
+}
+
 /* ------------------------------------------------------------------ minimap */
 
-function Minimap({ px, py, live, built, onGo }: { px: ReturnType<typeof usePlayer>["x"]; py: ReturnType<typeof usePlayer>["y"]; live: Record<string, { at: Pt | string; status: string }>; built: string[]; onGo: (x: number, y: number) => void }) {
+function Minimap({ px, py, live, built, hidden, onGo }: { px: ReturnType<typeof usePlayer>["x"]; py: ReturnType<typeof usePlayer>["y"]; live: Record<string, { at: Pt | string; status: string }>; built: string[]; hidden?: boolean; onGo: (x: number, y: number) => void }) {
   const W = 200;
   const k = W / WORLD.w;
   const H = WORLD.h * k;
@@ -481,7 +533,7 @@ function Minimap({ px, py, live, built, onGo }: { px: ReturnType<typeof usePlaye
   const dotY = useTransform(py, (v) => (v / TILE) * k - 3);
   const colors: Record<string, string> = Object.fromEntries(Object.values(ROOMS).filter((r) => built.includes(r.id)).map((r) => [r.id, r.floor]));
   return (
-    <div data-tour="minimap" className="absolute bottom-4 left-4 z-30 hidden rounded-[16px] bg-white/90 p-2 shadow-[var(--shadow-card)] ring-1 ring-black/[0.06] backdrop-blur md:block">
+    <div data-tour="minimap" className={`absolute bottom-4 left-4 z-30 hidden rounded-[16px] bg-white/90 p-2 shadow-[var(--shadow-card)] ring-1 ring-black/[0.06] backdrop-blur transition-opacity duration-200 md:block ${hidden ? "pointer-events-none opacity-0" : ""}`}>
       <div
         className="relative cursor-pointer overflow-hidden rounded-[10px] bg-[#f0ebe2]"
         style={{ width: W, height: H }}

@@ -119,7 +119,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     Object.entries(s.live)
       .filter(([id]) => id !== "ada" && id !== "you")
       .forEach(([id, l], i) => (agents[id] = { at: l.at, status: "idle", from: "ceo:outside", delay: 0.6 + i * 0.4, speed: 1.4 }));
-    return { rooms, agents, camera: built ? undefined : step >= 2 ? undefined : "ceo", labels: true };
+    // The whole floor, always: you watch your office fill in.
+    return { rooms, agents, labels: true };
   }, [s.rooms, s.live, s.adaBusy, step, built]);
 
   return (
