@@ -155,6 +155,7 @@ export function AgentCard({ id, summoned, onSendBack, onClose }: { id: string; s
       <div className="grid grid-cols-2 gap-x-1 gap-y-0.5 px-3 pb-3 pt-2.5">
         <Action icon={Icon.terminal} label="Live session" note={`${cfg?.runtime} · ${cfg?.model}`} onClick={() => ui.openWin({ kind: "terminal", id })} />
         <Action icon={Icon.memory} label="Memory" note="Lessons, role card, notes" onClick={() => ui.openWin({ kind: "memory", id })} />
+        <Action icon={Icon.file} label="Files" note="What it has written" onClick={() => ui.openWin({ kind: "files", id })} />
         <Action icon={Icon.settings} label="Config" note="Tools, permissions, budget" onClick={() => ui.openWin({ kind: "config", id })} />
         <Action icon={Icon.outputs} label="Outputs" note={unviewed ? `${unviewed} new of ${outputs.length}` : `${outputs.length} delivered`} onClick={() => ui.openPanel("outputs", `by:${id}`)} />
         <Action icon={Icon.plus} label="Assign a task" note="Head is copied" onClick={() => ui.openWin({ kind: "assign", id })} />

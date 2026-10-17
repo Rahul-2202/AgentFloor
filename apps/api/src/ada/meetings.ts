@@ -14,9 +14,9 @@ import type { Meeting, Minutes, OfficeData } from "./data.ts";
 export class MeetingError extends Error {}
 
 export class Meetings {
-  private readonly o: { ada: Ada; data: OfficeData; hub: OfficeHub; memory: MemoryService; setup: SetupService };
+  private readonly o: { ada: Ada; data: OfficeData; hub: OfficeHub; memory: MemoryService; setup: SetupService; log?: (msg: string) => void };
 
-  constructor(o: { ada: Ada; data: OfficeData; hub: OfficeHub; memory: MemoryService; setup: SetupService }) {
+  constructor(o: { ada: Ada; data: OfficeData; hub: OfficeHub; memory: MemoryService; setup: SetupService; log?: (msg: string) => void }) {
     this.o = o;
   }
 
@@ -38,15 +38,41 @@ export class Meetings {
     return this.o.data.saveMeeting(officeId, { id: m.id, threadId, state: "live", startsAt: new Date().toISOString() });
   }
 
-  /** Ends it, and Ada writes the minutes; decisions and action items follow. */
-  async end(officeId: string, id: string): Promise<{ meeting: Meeting; minutes: Minutes }> {
+  /**
+   * Ends it straight away (the heads stop and go back to their desks); Ada
+   * writes the minutes in the background, then decisions and action items follow.
+   */
+  async end(officeId: string, id: string): Promise<{ meeting: Meeting }> {
     const m = await this.need(officeId, id);
     if (m.state !== "live" || !m.threadId) throw new MeetingError("That meeting isn't running.");
     const thread = await this.o.data.thread(officeId, m.threadId);
+    await this.o.hub
+      .call(officeId, "ceo_end_meeting", { thread_id: m.threadId, outcome: "The CEO ended the meeting. Ada is writing the minutes; action items will come as tasks." })
+      .catch(() => {});
+    const meeting = await this.o.data.saveMeeting(officeId, { id: m.id, state: "ended" });
+    const job = this.writeMinutes(officeId, m, thread?.messages ?? []).catch((err: Error) => this.o.log?.(`office ${officeId}: minutes for "${m.title}": ${err.message}`));
+    this.writing.set(m.id, job);
+    void job.finally(() => this.writing.delete(m.id));
+    return { meeting };
+  }
+
+  /** Resolves when a just-ended meeting's minutes are written (for tests). */
+  minutesWritten(id: string): Promise<unknown> {
+    return this.writing.get(id) ?? Promise.resolve();
+  }
+
+  private readonly writing = new Map<string, Promise<unknown>>();
+
+  private async writeMinutes(officeId: string, m: Meeting, messages: { from: string; body: string }[]) {
     const { setup } = await this.o.setup.get(officeId);
     const who = (id: string) => (id === "ceo" ? "CEO" : setup.agents.find((a) => a.id === id)?.name ?? id);
-    const transcript = (thread?.messages ?? []).map((x) => `${who(x.from)}: ${x.body}`).join("\n\n");
-    const minutes = await this.o.ada.minutes(officeId, m, transcript);
+    // One line per thing said (the office keeps a copy per recipient).
+    const said: string[] = [];
+    for (const x of messages) {
+      const line = `${who(x.from)}: ${x.body}`;
+      if (said.at(-1) !== line && !said.slice(-6).includes(line)) said.push(line);
+    }
+    const minutes = await this.o.ada.minutes(officeId, m, said.join("\n\n"));
 
     // Each action item is a task for its owner (tracked through the task).
     for (const a of minutes.actionItems) {
@@ -54,8 +80,6 @@ export class Meetings {
       const r = (await this.o.hub.call(officeId, "ceo_assign", { to: a.owner, title: a.text, details: `From the meeting "${m.title}".${a.due ? ` Due: ${a.due}.` : ""}` }).catch(() => null)) as { taskId: string } | null;
       if (r) a.taskId = r.taskId;
     }
-    const outcome = [minutes.summary, ...minutes.decisions.map((d) => `Decided: ${d.text}`)].join(" ");
-    await this.o.hub.call(officeId, "ceo_end_meeting", { thread_id: m.threadId, outcome: outcome.slice(0, 1500) }).catch(() => {});
 
     // Memory: the minutes for the attendees, decisions in each room's decision log.
     const ids: string[] = [];
@@ -64,11 +88,11 @@ export class Meetings {
       (
         await this.o.memory.write(officeId, setup, "system", {
           layer: "conversation",
-          scopeId: m.threadId,
+          scopeId: m.threadId!,
           type: "minutes",
           title: `Minutes: ${m.title}`,
           body: [minutes.summary, ...minutes.decisions.map((d) => `Decision: ${d.text}${d.rationale ? ` (${d.rationale})` : ""}`), ...minutes.actionItems.map((a) => `Action: ${a.text} (${who(a.owner)})`)].join("\n"),
-          source: { threadId: m.threadId, meetingId: m.id, participants: ["ceo", ...m.attendees], rooms },
+          source: { threadId: m.threadId!, meetingId: m.id, participants: ["ceo", ...m.attendees], rooms },
           tags: ["minutes", ...rooms],
         })
       ).item.id,
@@ -76,10 +100,10 @@ export class Meetings {
     for (const d of minutes.decisions) {
       const room = d.room && setup.rooms.some((r) => r.id === d.room) ? d.room : rooms[0];
       if (!room) continue;
-      ids.push((await this.o.memory.write(officeId, setup, "system", { layer: "room", scopeId: room, type: "decision", title: `Decision: ${d.text.slice(0, 100)}`, body: `${d.text}${d.rationale ? `\nWhy: ${d.rationale}` : ""}\nFrom the meeting "${m.title}".`, source: { meetingId: m.id, threadId: m.threadId }, tags: ["decision", "meeting"] })).item.id);
+      ids.push((await this.o.memory.write(officeId, setup, "system", { layer: "room", scopeId: room, type: "decision", title: `Decision: ${d.text.slice(0, 100)}`, body: `${d.text}${d.rationale ? `\nWhy: ${d.rationale}` : ""}\nFrom the meeting "${m.title}".`, source: { meetingId: m.id, threadId: m.threadId! }, tags: ["decision", "meeting"] })).item.id);
     }
     await this.o.data.saveMinutes(officeId, minutes, ids);
-    return { meeting: await this.o.data.saveMeeting(officeId, { id: m.id, state: "ended" }), minutes };
+    return minutes;
   }
 
   /** Minutes with each action item's task status (Ada tracks them until done). */

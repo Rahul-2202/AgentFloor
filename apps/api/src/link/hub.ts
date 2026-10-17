@@ -172,6 +172,12 @@ export class OfficeHub {
       } catch {
         return socket.close(1003, "bad message");
       }
+      // Answers to calls and the live stream don't wait behind events being stored
+      // (a big batch can take a while, and a call answered late counts as timed out).
+      if (officeId && (msg.t === "result" || msg.t === "live")) {
+        void handle(msg).catch((err) => this.log(`office link ${officeId}: ${(err as Error).message}`));
+        return;
+      }
       queue = queue.then(() => handle(msg)).catch((err) => {
         this.log(`office link ${officeId ?? "?"}: ${(err as Error).message}`);
         socket.close(1011, "server error");

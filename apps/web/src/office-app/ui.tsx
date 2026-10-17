@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { PanelKey } from "@/sim/types";
 
-export type WindowKind = "chat" | "terminal" | "memory" | "config" | "assign" | "output" | "meeting" | "room" | "task";
+export type WindowKind = "chat" | "terminal" | "memory" | "config" | "assign" | "output" | "meeting" | "room" | "task" | "files";
 
 export interface Win {
   kind: WindowKind;

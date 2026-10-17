@@ -6,6 +6,7 @@ import { useUI } from "../ui";
 import { AssignWindow } from "./AssignWindow";
 import { ChatWindow } from "./ChatWindow";
 import { ConfigWindow } from "./ConfigWindow";
+import { FilesWindow } from "./FilesWindow";
 import { LiveMeeting, MeetingPlanner } from "./MeetingWindow";
 import { MemoryWindow } from "./MemoryWindow";
 import { OutputWindow } from "./OutputWindow";
@@ -23,6 +24,8 @@ export function WindowRouter() {
     <ChatWindow id={w.id ?? "ada"} mode={w.mode} tab={w.tab} />
   ) : w.kind === "terminal" ? (
     <TerminalWindow id={w.id!} />
+  ) : w.kind === "files" ? (
+    <FilesWindow id={w.id!} />
   ) : w.kind === "memory" ? (
     <MemoryWindow id={w.id!} />
   ) : w.kind === "config" ? (

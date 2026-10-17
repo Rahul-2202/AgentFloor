@@ -112,9 +112,18 @@ export function LiveMeeting({ id }: { id: string }) {
   const box = useRef<HTMLDivElement>(null);
   const lines = convo?.messages ?? [];
 
+  // Ada writes the minutes after the meeting ends: check until they're there.
   useEffect(() => {
-    if (m?.state === "ended") void meetingMinutes(m.id).then((r) => setMinutes(r.minutes), () => {});
-  }, [m?.id, m?.state]);
+    if (m?.state !== "ended" || minutes) return;
+    let stop = false;
+    const load = () => void meetingMinutes(m.id).then((r) => !stop && r.minutes && setMinutes(r.minutes), () => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [m?.id, m?.state, minutes]);
   useEffect(() => {
     box.current?.scrollTo({ top: box.current.scrollHeight, behavior: "smooth" });
   }, [lines.length]);
@@ -204,6 +213,7 @@ export function LiveMeeting({ id }: { id: string }) {
               </div>
             ))}
           </div>
+          {m.state === "ended" && !minutes && <div className="rounded-[14px] bg-[#fff4ec] p-3 text-[12.5px] text-[#8a4a24] ring-1 ring-[#f3cfb6]">Ada is writing the minutes. Action items will arrive as tasks.</div>}
           {minutes && (
             <div className="rounded-[14px] bg-white p-3 ring-1 ring-black/[0.08]">
               <div className="text-[10.5px] font-bold uppercase tracking-wide text-faint">Minutes</div>

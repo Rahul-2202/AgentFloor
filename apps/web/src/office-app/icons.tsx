@@ -28,5 +28,6 @@ export const Icon = {
   wave: <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M7 11V6.5a1.5 1.5 0 013 0V11M10 10V4.5a1.5 1.5 0 013 0V10M13 10V5.5a1.5 1.5 0 013 0V12M7 11.5a1.5 1.5 0 00-3 0c0 5 3 9.5 8.5 9.5 3.5 0 6.5-3 6.5-7V8.5a1.5 1.5 0 00-3 0V12" /></svg>,
   link: <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" /></svg>,
   door: <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M5 21V4a1 1 0 011-1h9l4 2v16M3 21h18" /><circle cx="13" cy="12" r=".8" /></svg>,
+  file: <svg width="16" height="16" viewBox="0 0 24 24" {...P}><path d="M6 3h8l4 4v14H6V3z" /><path d="M14 3v4h4M9 12h6M9 16h6" /></svg>,
   search: <svg width="15" height="15" viewBox="0 0 24 24" {...P}><circle cx="11" cy="11" r="6.5" /><path d="M20 20l-4-4" /></svg>,
 };
