@@ -31,7 +31,9 @@ export type DaemonMessage =
   | { t: "result"; id: string; ok: false; error: { code: string; message: string } }
   | { t: "config_applied"; version: number; ok: boolean; error?: string }
   | { t: "live"; event: OfficeEvent }
-  | { t: "request"; id: string; name: string; args: unknown };
+  | { t: "request"; id: string; name: string; args: unknown }
+  /** Something went wrong in the office (tracked by the API with the office's id). */
+  | { t: "log"; level: "error" | "warn"; message: string };
 
 export type ApiMessage =
   | { t: "welcome"; officeId: string; lastSeq: number }

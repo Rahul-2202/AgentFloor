@@ -8,6 +8,9 @@ import { supabaseBudgetStore } from "./budgets.ts";
 import { loadConfig } from "./config.ts";
 import { GitHubApp } from "./github/app.ts";
 import { supabaseGitHubStore } from "./github/service.ts";
+import { LinearClient } from "./linear/client.ts";
+import { supabaseLinearStore, supabaseTaskSource } from "./linear/service.ts";
+import { backupMemory, supabaseAccess, supabaseAdminData, supabaseErrorLog } from "./ops/ops.ts";
 import { supabaseConversationSource } from "./memory/office.ts";
 import { supabaseMemoryStore } from "./memory/store.ts";
 import { supabaseLinkStore } from "./link/store.ts";
@@ -30,10 +33,30 @@ try {
 
 const db = serviceClient(config.supabaseUrl, config.supabaseSecretKey);
 const verify = makeVerifier(config);
-const log = (msg: string) => console.log(msg);
+const errors = supabaseErrorLog(db, (m) => console.log(m));
+// Logged problems are tracked too (with the office, when the line names one).
+const log = (msg: string) => {
+  console.log(msg);
+  if (/error|fail|refused|couldn't|can't|timed out|projecting|no unique/i.test(msg)) {
+    errors.record("api", msg, { officeId: /office ([0-9a-f]{8}-[0-9a-f-]{27})/.exec(msg)?.[1] ?? null });
+  }
+};
+process.on("unhandledRejection", (err) => {
+  const e = err instanceof Error ? err : new Error(String(err));
+  console.error("unhandled rejection:", e);
+  errors.record("api", `unhandled rejection: ${e.message}`, { stack: e.stack });
+});
+process.on("uncaughtException", (err) => {
+  console.error("uncaught exception:", err);
+  errors.record("api", `crash: ${err.message}`, { stack: err.stack });
+  setTimeout(() => process.exit(1), 500); // let the record go out; Railway restarts the service
+});
+const access = supabaseAccess(db);
+const admin = supabaseAdminData(db);
 const s = createServices({
   verify,
   log,
+  errors,
   stores: {
     offices: supabaseOfficeStore(db),
     link: supabaseLinkStore(db),
@@ -45,7 +68,13 @@ const s = createServices({
     memory: supabaseMemoryStore(db),
     conversations: supabaseConversationSource(db),
     data: supabaseOfficeData(db),
+    linear: supabaseLinearStore(db),
+    tasks: supabaseTaskSource(db),
+    audit: async (officeId, actor, action, target, detail) => {
+      await db.from("audit_log").insert({ office_id: officeId, actor, action, target, detail });
+    },
   },
+  linear: config.linear ? { client: new LinearClient({ apiKey: config.linear.apiKey }), publicUrl: config.publicUrl, secret: config.supabaseSecretKey } : null,
   ada: config.ada ? { brain: agentSdkBrain({ token: config.ada.token, model: config.ada.model, effort: config.ada.effort }) } : null,
   github: config.github ? { app: new GitHubApp(config.github) } : null,
   machine: config.daytona
@@ -73,6 +102,7 @@ const app = await buildApp({
   spend: s.stores.budgets,
   watchers: s.watchers,
   github: s.github,
+  linear: s.linear,
   ada: s.ada,
   meetings: s.meetings,
   memory: s.memory,
@@ -91,6 +121,10 @@ const app = await buildApp({
     const { error } = await db.from("inbox_items").update({ state: "resolved", resolved_at: new Date().toISOString() }).eq("office_id", officeId).eq("id", id);
     if (error) throw new Error(error.message);
   },
+  access,
+  errors,
+  admin,
+  backup: () => backupMemory(db, admin),
   webOrigins: config.webOrigins,
   logger: true,
 });
@@ -110,8 +144,30 @@ const budgetTimer = setInterval(() => {
   }
 }, 10 * 60_000);
 
+// Every 5 minutes: machines that stopped on their own (idle) are marked so, which closes their run.
+const machineTimer = setInterval(async () => {
+  if (!s.machines) return;
+  const { data } = await db.from("offices").select("id").in("sandbox_state", ["started", "starting"]);
+  for (const o of data ?? []) void s.machines.refresh(o.id).catch((err) => log(`office ${o.id}: checking the machine failed: ${err.message}`));
+}, 5 * 60_000);
+
+// Nightly at 03:00 UTC: each office's memory to the backups bucket (30 days kept).
+let backedUp = "";
+const backupTimer = setInterval(() => {
+  const now = new Date();
+  const day = now.toISOString().slice(0, 10);
+  if (now.getUTCHours() !== 3 || backedUp === day) return;
+  backedUp = day;
+  void backupMemory(db, admin, now).then(
+    (r) => console.log(`backed up memory for ${r.offices} offices`),
+    (err) => log(`memory backup failed: ${err.message}`),
+  );
+}, 10 * 60_000);
+
 for (const sig of ["SIGTERM", "SIGINT"] as const) {
   process.on(sig, () => {
+    clearInterval(machineTimer);
+    clearInterval(backupTimer);
     clearInterval(budgetTimer);
     void app.close().then(() => process.exit(0));
   });

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Figtree, Newsreader } from "next/font/google";
+import { ErrorReporter } from "./ErrorReporter";
 import "./globals.css";
 
 const figtree = Figtree({
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://api.fontshare.com" />
         <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ErrorReporter />
+        {children}
+      </body>
     </html>
   );
 }

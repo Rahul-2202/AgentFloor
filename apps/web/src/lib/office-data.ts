@@ -124,6 +124,13 @@ export interface FlagRow {
   state: string;
 }
 
+export interface LinearIssueRow {
+  issue_id: string;
+  identifier: string;
+  url: string;
+  task_id: string | null;
+}
+
 export interface OfficeData {
   agents: AgentRow[];
   rooms: RoomRow[];
@@ -135,10 +142,11 @@ export interface OfficeData {
   flags: FlagRow[];
   meetings: MeetingRow[];
   audit: AuditRow[];
+  linear: LinearIssueRow[];
   loaded: boolean;
 }
 
-const EMPTY: OfficeData = { agents: [], rooms: [], tasks: [], threads: [], messages: [], inbox: [], memory: [], flags: [], meetings: [], audit: [], loaded: false };
+const EMPTY: OfficeData = { agents: [], rooms: [], tasks: [], threads: [], messages: [], inbox: [], memory: [], flags: [], meetings: [], audit: [], linear: [], loaded: false };
 
 /** How each table is read; Realtime changes reload just that table. */
 const TABLES = {
@@ -152,6 +160,7 @@ const TABLES = {
   flags: (o: string) => supabase.from("memory_flags").select("*").eq("office_id", o).eq("state", "open"),
   meetings: (o: string) => supabase.from("meetings").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(50),
   audit: (o: string) => supabase.from("audit_log").select("*").eq("office_id", o).order("created_at", { ascending: false }).limit(300),
+  linear: (o: string) => supabase.from("linear_issues").select("issue_id, identifier, url, task_id").eq("office_id", o).limit(1000),
 } as const;
 const REALTIME: Record<string, keyof typeof TABLES> = {
   agents: "agents",
@@ -164,6 +173,7 @@ const REALTIME: Record<string, keyof typeof TABLES> = {
   memory_flags: "flags",
   meetings: "meetings",
   audit_log: "audit",
+  linear_issues: "linear",
 };
 
 /**

@@ -7,6 +7,7 @@ import { useSim } from "@/sim/store";
 import type { PermKey } from "@/sim/types";
 import { Bar, Btn, Empty, Face, Section, Toggle } from "../bits";
 import { GitHubCard } from "../real/GitHubCard";
+import { LinearCard } from "../real/LinearCard";
 import { useUI } from "../ui";
 import { nameOf } from "../who";
 
@@ -249,7 +250,10 @@ export function GovernancePanel({ initial }: { initial?: string }) {
 
       <div data-anchor="github">
         <Section title="Integrations">
-          <GitHubCard />
+          <div className="flex flex-col gap-2">
+            <GitHubCard />
+            <LinearCard />
+          </div>
         </Section>
       </div>
 

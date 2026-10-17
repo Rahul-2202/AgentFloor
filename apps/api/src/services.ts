@@ -13,6 +13,9 @@ import { MemoryService } from "./memory/service.ts";
 import type { MemoryStore } from "./memory/store.ts";
 import type { GitHubApp } from "./github/app.ts";
 import { GitHubService, type GitHubStore } from "./github/service.ts";
+import type { LinearClient } from "./linear/client.ts";
+import { LinearSync, type LinearStore, type TaskLike, type TicketRequest } from "./linear/service.ts";
+import type { ErrorLog } from "./ops/ops.ts";
 import { OfficeHub } from "./link/hub.ts";
 import type { LinkStore } from "./link/store.ts";
 import { Watchers } from "./live/watchers.ts";
@@ -34,6 +37,10 @@ export interface ServiceStores {
   memory?: MemoryStore;
   conversations?: ConversationSource;
   data?: OfficeData;
+  linear?: LinearStore;
+  /** Office tasks as stored (for Linear). */
+  tasks?: { open(officeId: string): Promise<TaskLike[]>; one(officeId: string, id: string): Promise<TaskLike | null> };
+  audit?: (officeId: string, actor: string, action: string, target: string | null, detail: object) => Promise<void>;
 }
 
 export interface MachineConfig extends Omit<MachineOptions, "cloud" | "machines" | "link" | "connectedSince"> {
@@ -46,6 +53,10 @@ export function createServices(o: {
   machine: MachineConfig | null;
   /** The GitHub App; null until it's configured. */
   github?: { app: GitHubApp; cloneUrlOf?: (fullName: string) => string } | null;
+  /** Where problems are tracked (errors table). */
+  errors?: ErrorLog;
+  /** Linear; null until a key is configured. */
+  linear?: { client: LinearClient; publicUrl: string | null; secret: string } | null;
   /** Ada's model; null when no Claude credential is configured. */
   ada?: { brain: AdaBrain; triageDelayMs?: number } | null;
   log?: (msg: string) => void;
@@ -68,6 +79,24 @@ export function createServices(o: {
   const github =
     o.github && o.stores.github ? new GitHubService({ app: o.github.app, store: o.stores.github, hub, cloneUrlOf: o.github.cloneUrlOf }) : null;
   if (github) setup.extras = async (id) => ({ repo: await github.repoRef(id) });
+
+  const linear =
+    o.linear && o.stores.linear && o.stores.tasks
+      ? new LinearSync({
+          client: o.linear.client,
+          store: o.stores.linear,
+          hub,
+          secret: o.linear.secret,
+          publicUrl: o.linear.publicUrl,
+          officeName: async (id) => (await setup.get(id)).setup.name,
+          agents: async (id) => (await setup.get(id)).setup.agents.map((a) => ({ id: a.id, name: a.name, room: a.room })),
+          rooms: async (id) => (await setup.get(id)).setup.rooms.map((r) => ({ id: r.id, name: r.name, head: r.head })),
+          openTasks: (id) => o.stores.tasks!.open(id),
+          taskOf: (id, t) => o.stores.tasks!.one(id, t),
+          audit: o.stores.audit ? (id, action, target, detail) => o.stores.audit!(id, "linear", action, target, detail) : undefined,
+          log,
+        })
+      : null;
 
   const memory = o.stores.memory ? new MemoryService(o.stores.memory) : null;
   const officeMemory =
@@ -96,11 +125,19 @@ export function createServices(o: {
       if (!officeMemory) throw new Error("Office memory isn't available on this server.");
       return officeMemory.handle(id, args as { agent: string; op: string; args: Record<string, unknown> });
     }
+    if (name === "linear") {
+      if (!linear) throw new Error("Linear isn't set up on this server.");
+      return linear.handle(id, args as TicketRequest);
+    }
     if (!github) throw new Error("GitHub isn't set up on this server yet.");
     return github.handle(id, name, args);
   };
 
-  const warn = (what: string) => (err: Error) => log(`${what}: ${err.message}`);
+  const warn = (what: string) => (err: Error) => {
+    log(`${what}: ${err.message}`);
+    o.errors?.record("api", `${what}: ${err.message}`, { stack: err.stack });
+  };
+  hub.onLog = (id, _level, message) => o.errors?.record("office", message, { officeId: id });
   // A daemon (re)connects: give it its setup, catch the tables up, re-check budgets.
   hub.onConnect = (id) => {
     void setup.push(id).catch(warn("pushing setup"));
@@ -113,13 +150,19 @@ export function createServices(o: {
     await projector.catchUp(id);
     // Memory reads the projected tables, so it runs after them.
     await officeMemory?.onEvents(id, events).catch(warn("memory"));
+    // Linear in the background: its API is slow next to the office's events.
+    if (linear) {
+      const tasks = new Map<string, TaskLike>();
+      for (const e of events) if (e.type === "task.updated" && (e.data as { task?: TaskLike }).task) tasks.set((e.data as { task: TaskLike }).task.id, (e.data as { task: TaskLike }).task);
+      if (tasks.size) void linear.onTasks(id, [...tasks.values()]).catch(warn("linear"));
+    }
     if (events.some((e) => e.type === "inbox.added")) triageSoon(id);
   };
   projector.onUsage = (id) => void budgets.check(id).catch(warn("budgets"));
   hub.onLive = (id, ev) => watchers.broadcast(id, ev);
   if (machines) hub.onActivity = (id) => void machines.activity(id).catch(warn("keep-awake"));
 
-  return { hub, setup, projector, budgets, machines, watchers, github, memory, officeMemory, ada, meetings, triageSoon, stores: o.stores };
+  return { hub, setup, projector, budgets, machines, watchers, github, linear, memory, officeMemory, ada, meetings, triageSoon, stores: o.stores };
 }
 
 export type Services = ReturnType<typeof createServices>;

@@ -4,14 +4,16 @@
 import { defineRailway, github, preserve, project, service } from "railway/iac";
 
 export default defineRailway((ctx) => {
-  // Production comes with the internal launch (M8); staging deploys from main.
-  if (ctx.environment === "production") return project("AgentFloor", { resources: [] });
-
-  const source = github("Rahul-2202/AgentFloor", { branch: "main" });
+  // Staging deploys every merge to main. Production deploys the "production"
+  // branch: promote a tested main with `git push origin main:production`
+  // (see docs/LAUNCH.md). Each environment has its own Supabase project and keys.
+  const production = ctx.environment === "production";
+  const source = github("Rahul-2202/AgentFloor", { branch: production ? "production" : "main" });
 
   const api = service("api", {
     source,
-    build: { builder: "RAILPACK", watchPatterns: ["apps/api/**", "packages/shared/**", "package-lock.json"] },
+    // The API also ships the office code (packages/daemon) to office machines: changes there redeploy it.
+    build: { builder: "RAILPACK", watchPatterns: ["apps/api/**", "packages/daemon/**", "packages/shared/**", "package-lock.json"] },
     start: "npm run start -w @agentfloor/api",
     healthcheck: "/health",
     healthcheckTimeout: 60,
@@ -31,6 +33,8 @@ export default defineRailway((ctx) => {
       // Ada runs on the company's Claude login (claude setup-token); kept as set on Railway.
       AGENTFLOOR_CLAUDE_TOKEN: preserve(),
       ADA_MODEL: "haiku",
+      // Linear (office tasks ↔ issues): a personal API key, kept as set on Railway.
+      LINEAR_API_KEY: preserve(),
     },
   });
 

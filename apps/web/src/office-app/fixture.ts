@@ -65,6 +65,7 @@ export const FIXTURE: Fixture = {
     flags: [],
     meetings: [],
     audit: [{ id: 1, actor: "ceo", action: "setup.applied", target: "v3", detail: {}, created_at: ago(70) }],
+    linear: [{ issue_id: "lin-1", identifier: "ENG-12", url: "https://linear.app", task_id: "T-1" }],
   },
 };
 
@@ -73,5 +74,5 @@ export const EMPTY_FIXTURE: Fixture = {
   version: 1,
   spend: [],
   setup: { name: "Acme Robotics", policy: FIXTURE.setup.policy, rooms: [], agents: [], budgets: [{ scope: "office", id: "", dailyUsdSoft: 5, dailyUsdHard: 20 }], locks: ["merge"] },
-  data: { loaded: true, rooms: [], agents: [], tasks: [], threads: [], messages: [], inbox: [], memory: [], flags: [], meetings: [], audit: [] },
+  data: { loaded: true, rooms: [], agents: [], tasks: [], threads: [], messages: [], inbox: [], memory: [], flags: [], meetings: [], audit: [], linear: [] },
 };

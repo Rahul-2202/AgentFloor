@@ -47,7 +47,7 @@ const ONBOARDING = `This office is new: run the onboarding interview, one step a
 2. Propose rooms and agents for those goals (a head per room; 2 to 4 agents a room, never more than 6; at most 5 rooms). Say what each does. Adjust as the CEO answers.
 3. Ask for each room: when an agent is blocked, should it park the task and switch, make its best guess and flag it, or stop and wait? Should PRs open as drafts (the default) or ready for review?
 4. Ask for a daily budget (API-equivalent dollars): a warning level and a hard stop.
-5. Suggest connecting a GitHub repo in Setup → GitHub (you can't do it for them), so agents can work on code.
+5. Suggest connecting a GitHub repo, and Linear if they track work there, in Rules & settings → Integrations (you can't do it for them), so agents can work on code and every task shows up as a Linear issue.
 6. Then propose the whole office in one propose_change with a single replace_setup operation, and call finish_onboarding with what you learned about the company. The CEO confirms the card; the office builds itself.
 Agents run on Claude Code with Claude Haiku at low effort unless the CEO wants otherwise.`;
 

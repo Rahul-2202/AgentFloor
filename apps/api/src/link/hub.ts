@@ -50,6 +50,8 @@ export class OfficeHub {
   };
   /** Live events (session output, "thinking"), for browsers watching the office. */
   onLive: (officeId: string, event: OfficeEvent) => void = () => {};
+  /** A problem the office reported. */
+  onLog: (officeId: string, level: "error" | "warn", message: string) => void = () => {};
 
   constructor(store: LinkStore, log: (msg: string) => void = () => {}, opts: { heartbeatMs?: number } = {}) {
     this.store = store;
@@ -150,6 +152,8 @@ export class OfficeHub {
           (result) => send(socket, { t: "response", id: msg.id, ok: true, result }),
           (err: Error & { code?: string }) => send(socket, { t: "response", id: msg.id, ok: false, error: { code: err.code ?? "error", message: err.message } }),
         );
+      } else if (msg.t === "log") {
+        this.onLog(officeId, msg.level, msg.message);
       } else if (msg.t === "live") {
         this.onLive(officeId, msg.event);
       } else if (msg.t === "config_applied") {
@@ -174,7 +178,7 @@ export class OfficeHub {
       }
       // Answers to calls and the live stream don't wait behind events being stored
       // (a big batch can take a while, and a call answered late counts as timed out).
-      if (officeId && (msg.t === "result" || msg.t === "live")) {
+      if (officeId && (msg.t === "result" || msg.t === "live" || msg.t === "log")) {
         void handle(msg).catch((err) => this.log(`office link ${officeId}: ${(err as Error).message}`));
         return;
       }

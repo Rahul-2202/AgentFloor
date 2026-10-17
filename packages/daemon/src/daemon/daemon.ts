@@ -48,7 +48,13 @@ export interface RunningOffice {
 
 /** Starts an office: store, protocol, API, escalation clock and agents. */
 export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
-  const log = opts.log ?? ((l: string) => console.log(l));
+  const print = opts.log ?? ((l: string) => console.log(l));
+  // Problems also go to the API (once the link is up), so they're tracked with the office.
+  let report: ((line: string) => void) | null = null;
+  const log = (l: string) => {
+    print(l);
+    if (report && /error|fail|couldn't|can't|crash|refused|timed out|exception/i.test(l) && !l.startsWith("[link]")) report(l);
+  };
   mkdirSync(opts.dataDir, { recursive: true });
   // The setup the Control API last pushed wins over the starting config.
   const savedConfig = join(opts.dataDir, "office-config.json");
@@ -209,6 +215,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
 
   const link = opts.link ? new OfficeLink({ office, ...opts.link, log: (l) => log(`[link] ${l}`) }) : null;
   if (link) office.hooks.api = (name, args) => link.request(name, args);
+  if (link) report = (line) => link.report("error", line);
   link?.start();
 
   return {

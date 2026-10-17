@@ -202,7 +202,8 @@ export function buildState(i: RealInputs, layout: Layout) {
   const locked: LockedRule[] = (Object.keys(LOCK_TARGETS) as LockTarget[]).map((t) => ({ id: t, text: LOCK_TARGETS[t], locked: locks.has(t) }));
 
   const slotOfRoom = (realRoom: string | null | undefined) => (realRoom ? layout.slotOf[realRoom] ?? realRoom : "dev");
-  const tasks: Task[] = data.tasks.map((t) => toTask(t, slotOfRoom(t.room_id)));
+  const issueOf = new Map(data.linear.filter((l) => l.task_id).map((l) => [l.task_id!, { identifier: l.identifier, url: l.url }]));
+  const tasks: Task[] = data.tasks.map((t) => ({ ...toTask(t, slotOfRoom(t.room_id)), linear: issueOf.get(t.id) }));
   const outputs: Output[] = data.tasks.flatMap((t) => toOutputs(t, slotOfRoom(t.room_id), data.audit));
   const calendar: CalEvent[] = data.meetings.map(toEvent);
   const conversations: Conversation[] = toConversations(data.threads, data.messages, layout, agents);
