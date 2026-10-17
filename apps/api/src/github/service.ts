@@ -35,8 +35,19 @@ export class GitHubService {
     this.cloneUrlOf = o.cloneUrlOf ?? ((n) => `https://github.com/${n}.git`);
   }
 
-  async status(officeId: string) {
-    return { installUrl: this.app.installUrl(), link: await this.store.get(officeId) };
+  async status(officeId: string, user?: User) {
+    const link = await this.store.get(officeId);
+    // Already installed on the CEO's own account (say, for an earlier office): GitHub won't send
+    // them back after "installing" again, so offer to connect the existing installation directly.
+    const existing = !link && user ? await this.ownInstallation(user).catch(() => null) : null;
+    return { installUrl: this.app.installUrl(), link, existing };
+  }
+
+  /** The app's installation on the user's own GitHub account, if there is one. */
+  private async ownInstallation(user: User): Promise<{ installationId: string; account: string } | null> {
+    if (!user.githubLogin) return null;
+    const mine = (await this.app.installations()).find((i) => i.type === "User" && i.account.toLowerCase() === user.githubLogin!.toLowerCase());
+    return mine ? { installationId: mine.id, account: mine.account } : null;
   }
 
   /** After the CEO installs the app (GitHub sends them back with installation_id). */
