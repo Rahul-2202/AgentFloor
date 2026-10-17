@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ensureOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { OfficeApp } from "@/office-app/OfficeApp";
-import { SignIn } from "./SignIn";
+import { SignIn, Splash } from "./SignIn";
 
 type State =
   | { kind: "loading" }
@@ -74,6 +74,9 @@ export default function Home() {
     supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: window.location.origin } });
 
   if (state.kind === "office") return <OfficeApp key={state.office.id} office={state.office} />;
+  // Until we know whether this browser is signed in (and while the office loads), show nothing that
+  // looks like the sign-in page: a refresh of a signed-in office shouldn't flash the landing.
+  if (state.kind === "loading") return <Splash />;
 
   return (
     <SignIn
