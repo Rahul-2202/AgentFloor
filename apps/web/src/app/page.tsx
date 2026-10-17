@@ -1,7 +1,7 @@
 "use client";
 
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ensureOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { OfficeApp } from "@/office-app/OfficeApp";
@@ -50,6 +50,26 @@ export default function Home() {
     };
   }, []);
 
+  // Waiting to be let in: check now and then, and open the office the moment an admin does.
+  const [checking, setChecking] = useState(false);
+  const checkAgain = useCallback(async () => {
+    if (state.kind !== "not-allowed") return;
+    setChecking(true);
+    try {
+      const { office } = await ensureOffice();
+      setState({ kind: "office", session: state.session, office });
+    } catch {
+      // still waiting
+    } finally {
+      setChecking(false);
+    }
+  }, [state]);
+  useEffect(() => {
+    if (state.kind !== "not-allowed") return;
+    const t = setInterval(() => void checkAgain(), 20_000);
+    return () => clearInterval(t);
+  }, [state.kind, checkAgain]);
+
   const signIn = () =>
     supabase.auth.signInWithOAuth({ provider: "github", options: { redirectTo: window.location.origin } });
 
@@ -61,6 +81,16 @@ export default function Home() {
       error={"error" in state ? state.error : undefined}
       onSignIn={() => void signIn()}
       onSignOut={() => void supabase.auth.signOut()}
+      who={"session" in state ? whoOf(state.session) : undefined}
+      checking={checking}
+      onCheckAgain={() => void checkAgain()}
     />
   );
+}
+
+/** The GitHub account someone signed in with (for the waiting page). */
+function whoOf(session: Session) {
+  const m = session.user.user_metadata as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return { login: str(m.user_name), name: str(m.full_name) ?? str(m.name), avatar: str(m.avatar_url), email: session.user.email ?? null };
 }

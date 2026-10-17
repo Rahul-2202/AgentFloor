@@ -14,6 +14,20 @@ export interface Access {
   list(): Promise<AllowEntry[]>;
   add(e: { githubLogin?: string; email?: string; note?: string; admin?: boolean }): Promise<void>;
   remove(id: number): Promise<void>;
+  /** Someone signed in who isn't on the list yet: admins see them in /admin. */
+  request(user: User): Promise<void>;
+  /** Those still waiting (not let in, not dismissed), newest first. */
+  requests(): Promise<AccessRequest[]>;
+  dismiss(id: number): Promise<void>;
+}
+export interface AccessRequest {
+  id: number;
+  userId: string;
+  githubLogin: string | null;
+  email: string | null;
+  name: string | null;
+  firstAt: string;
+  lastAt: string;
 }
 export interface AllowEntry {
   id: number;
@@ -25,6 +39,7 @@ export interface AllowEntry {
 
 export function supabaseAccess(db: SupabaseClient): Access {
   let cache: { at: number; rows: AllowEntry[] } | null = null;
+  const asked = new Map<string, number>();
   const rows = async (): Promise<AllowEntry[]> => {
     if (cache && Date.now() - cache.at < 60_000) return cache.rows;
     const { data, error } = await db.from("allowlist").select("id, github_login, email, note, admin").order("id");
@@ -54,6 +69,27 @@ export function supabaseAccess(db: SupabaseClient): Access {
       const { error } = await db.from("allowlist").delete().eq("id", id);
       if (error) throw new Error(error.message);
       cache = null;
+    },
+    async request(user) {
+      // The waiting page checks again every so often: a write every few minutes is plenty.
+      if (Date.now() - (asked.get(user.id) ?? 0) < 5 * 60_000) return;
+      asked.set(user.id, Date.now());
+      const { error } = await db
+        .from("access_requests")
+        .upsert({ user_id: user.id, github_login: user.githubLogin, email: user.email, name: user.name, last_at: new Date().toISOString() }, { onConflict: "user_id" });
+      if (error) throw new Error(`recording an access request: ${error.message}`);
+    },
+    async requests() {
+      const { data, error } = await db.from("access_requests").select("id, user_id, github_login, email, name, first_at, last_at").is("dismissed_at", null).order("last_at", { ascending: false });
+      if (error) throw new Error(`reading access requests: ${error.message}`);
+      const list = await rows();
+      const listed = (r: { github_login: string | null; email: string | null }) =>
+        list.some((e) => (r.github_login && e.githubLogin?.toLowerCase() === r.github_login.toLowerCase()) || (r.email && e.email?.toLowerCase() === r.email.toLowerCase()));
+      return (data ?? []).filter((r) => !listed(r)).map((r) => ({ id: r.id, userId: r.user_id, githubLogin: r.github_login, email: r.email, name: r.name, firstAt: r.first_at, lastAt: r.last_at }));
+    },
+    async dismiss(id) {
+      const { error } = await db.from("access_requests").update({ dismissed_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw new Error(error.message);
     },
   };
 }
