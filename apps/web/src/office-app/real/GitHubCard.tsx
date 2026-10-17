@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { chooseRepo, githubRepos, githubStatus, type GitHubStatus } from "@/lib/api";
+import { chooseRepo, connectGithub, githubRepos, githubStatus, type GitHubStatus } from "@/lib/api";
 import { Btn } from "../bits";
 import { BrandIcon } from "@/components/brands";
 
@@ -10,6 +10,7 @@ export function GitHubCard() {
   const [status, setStatus] = useState<GitHubStatus | null>(null);
   const [repos, setRepos] = useState<{ fullName: string }[] | null>(null);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const load = () => githubStatus().then(setStatus, (e) => setErr(e.message));
   useEffect(() => {
     void load();
@@ -34,7 +35,29 @@ export function GitHubCard() {
                     : `Connected as ${status.link.account} · choose a repo`}
           </div>
         </div>
-        {status?.configured && !status.link && status.installUrl && (
+        {status?.configured && !status.link && status.existing && (
+          <Btn
+            tone="dark"
+            className="!py-1 !text-[12px]"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setErr("");
+              try {
+                await connectGithub(status.existing!.installationId);
+                await load();
+                setRepos((await githubRepos()).repos);
+              } catch (e) {
+                setErr((e as Error).message);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "Connecting…" : `Connect ${status.existing.account}`}
+          </Btn>
+        )}
+        {status?.configured && !status.link && !status.existing && status.installUrl && (
           <a href={status.installUrl} className="rounded-full bg-ink px-3 py-1.5 text-[12px] font-semibold text-white">
             Connect
           </a>
@@ -49,6 +72,7 @@ export function GitHubCard() {
         <select
           defaultValue=""
           onChange={(e) => e.target.value && chooseRepo(e.target.value).then(() => (setRepos(null), load()), (er) => setErr(er.message))}
+          autoFocus
           className="mt-2.5 w-full rounded-[12px] bg-[#f6f5f2] px-3 py-2 text-[13px] outline-none ring-1 ring-black/[0.06]"
         >
           <option value="">Choose a repo…</option>
@@ -57,7 +81,7 @@ export function GitHubCard() {
           ))}
         </select>
       )}
-      {status?.link && status.installUrl && (
+      {(status?.link || status?.existing) && status.installUrl && (
         <a href={status.installUrl} className="mt-2 inline-block text-[11.5px] font-semibold text-muted hover:text-ink">
           Give the app access to more repos ↗
         </a>

@@ -64,6 +64,12 @@ export class GitHubApp {
     return { account: r.account.login, type: r.account.type };
   }
 
+  /** The app's installations (who has it installed). */
+  async installations(): Promise<{ id: string; account: string; type: "User" | "Organization" }[]> {
+    const r = await this.call<{ id: number; account: { login: string; type: "User" | "Organization" } }[]>("GET", "/app/installations?per_page=100", await this.appJwt());
+    return r.map((i) => ({ id: String(i.id), account: i.account.login, type: i.account.type }));
+  }
+
   /** A token for one repo of an installation: contents and pull requests, read and write. */
   async token(installationId: string, repo: string): Promise<string> {
     const key = `${installationId}:${repo}`;

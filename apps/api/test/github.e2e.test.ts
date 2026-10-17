@@ -61,6 +61,7 @@ async function fakeGitHub() {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(o));
     };
+    if (path === "/app/installations") return json(200, [{ id: 99, account: { login: "someone-else", type: "User" } }, { id: 42, account: { login: "ceo-login", type: "User" } }]);
     if (path === "/app/installations/42") return json(200, { account: { login: "ceo-login", type: "User" } });
     if (path === "/app/installations/99") return json(200, { account: { login: "someone-else", type: "User" } });
     if (path.endsWith("/access_tokens")) return json(201, { token: `ghs_${body?.repositories?.[0] ?? "meta"}`, expires_at: new Date(Date.now() + 3600_000).toISOString() });
@@ -134,6 +135,11 @@ test("connect GitHub, pick a repo, agents work in worktrees, open a PR, the CEO 
   });
   const call = (method: "GET" | "POST", url: string, payload?: object) => api.inject({ method, url, payload, headers: { authorization: "Bearer x" } });
   await until("setup", () => daemon.office.config.agents.some((a) => a.id === "pm"));
+
+  // Already installed on the CEO's account (an earlier office): offered for a direct connect.
+  const before = (await call("GET", "/office/github")).json();
+  assert.deepEqual(before.existing, { installationId: "42", account: "ceo-login" });
+  assert.equal(before.link, null);
 
   // Someone else's installation can't be claimed; the CEO's own can.
   assert.equal((await call("POST", "/office/github/connect", { installationId: "99" })).statusCode, 400);

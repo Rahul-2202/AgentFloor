@@ -242,7 +242,7 @@ export async function buildApp(deps: Deps) {
       const id = await officeOf(req);
       if (!id) return reply.code(404).send({ error: "no office yet" });
       if (!deps.github) return { configured: false };
-      return { configured: true, ...(await deps.github.status(id)) };
+      return { configured: true, ...(await deps.github.status(id, req.user)) };
     });
 
     /** After installing the app: GitHub sent the CEO back with an installation id. */

@@ -95,6 +95,8 @@ export interface GitHubStatus {
   configured: boolean;
   installUrl?: string;
   link?: { installationId: string; account: string; repo: string | null; defaultBranch: string | null } | null;
+  /** The app is already installed on your GitHub account: connect it directly. */
+  existing?: { installationId: string; account: string } | null;
 }
 export interface PullRequestView {
   number: number;
