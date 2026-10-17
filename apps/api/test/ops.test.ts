@@ -5,7 +5,7 @@ import type { User } from "../src/auth.ts";
 import { OfficeHub } from "../src/link/hub.ts";
 import { memoryLinkStore } from "../src/link/store.ts";
 import type { OfficeStore } from "../src/offices.ts";
-import { fingerprint, type Access, type AllowEntry } from "../src/ops/ops.ts";
+import { fingerprint, type Access, type AccessRequest, type AllowEntry } from "../src/ops/ops.ts";
 
 const users: Record<string, User> = {
   boss: { id: "u1", email: null, githubLogin: "Boss", name: "Boss" },
@@ -16,14 +16,28 @@ const users: Record<string, User> = {
 function memoryAccess(): Access {
   let rows: AllowEntry[] = [{ id: 1, githubLogin: "boss", email: null, note: null, admin: true }];
   let next = 2;
+  const asked: (AccessRequest & { dismissed?: boolean })[] = [];
+  const check = async (u: { githubLogin: string | null; email: string | null }) => {
+    const hit = rows.find((r) => r.githubLogin?.toLowerCase() === u.githubLogin?.toLowerCase() || (r.email && r.email === u.email));
+    return { allowed: !!hit, admin: !!hit?.admin };
+  };
   return {
-    check: async (u) => {
-      const hit = rows.find((r) => r.githubLogin?.toLowerCase() === u.githubLogin?.toLowerCase() || (r.email && r.email === u.email));
-      return { allowed: !!hit, admin: !!hit?.admin };
-    },
+    check,
     list: async () => rows,
     add: async (e) => void rows.push({ id: next++, githubLogin: e.githubLogin ?? null, email: e.email ?? null, note: e.note ?? null, admin: !!e.admin }),
     remove: async (id) => void (rows = rows.filter((r) => r.id !== id)),
+    request: async (u) => {
+      const at = new Date().toISOString();
+      const r = asked.find((x) => x.userId === u.id);
+      if (r) r.lastAt = at;
+      else asked.push({ id: asked.length + 1, userId: u.id, githubLogin: u.githubLogin, email: u.email, name: u.name, firstAt: at, lastAt: at });
+    },
+    requests: async () => {
+      const out: AccessRequest[] = [];
+      for (const r of asked) if (!r.dismissed && !(await check(r)).allowed) out.push(r);
+      return out;
+    },
+    dismiss: async (id) => void (asked.find((x) => x.id === id)!.dismissed = true),
   };
 }
 
@@ -79,4 +93,32 @@ test("the browser may PATCH and DELETE (memory edits, removing someone from the 
     const res = await app.inject({ method: "OPTIONS", url: "/admin/allowlist/2", headers: { origin: "https://web.example", "access-control-request-method": method, "access-control-request-headers": "authorization" } });
     assert.match(String(res.headers["access-control-allow-methods"]), new RegExp(method));
   }
+});
+
+test("people who try to sign in show up for admins, who let them in or dismiss them", async () => {
+  const app = await buildApp({
+    verify: async (token) => users[token]!,
+    offices: { officeOf: async () => null, ensureOffice: async () => ({ office: { id: "o", name: "O", onboardedAt: null, sandboxState: "none", daemonConnected: false }, created: true }) },
+    hub: new OfficeHub(memoryLinkStore()),
+    access: memoryAccess(),
+    webOrigins: [],
+  });
+  const as = (who: string, method: "GET" | "POST" | "DELETE", url: string) => app.inject({ method, url, headers: { authorization: `Bearer ${who}` } });
+
+  assert.equal((await as("stranger", "POST", "/office")).statusCode, 403);
+  assert.equal((await as("teammate", "GET", "/me")).statusCode, 403);
+  assert.equal((await as("stranger", "GET", "/me")).statusCode, 403); // trying again doesn't add them twice
+  const { requests } = (await as("boss", "GET", "/admin/allowlist")).json() as { requests: AccessRequest[] };
+  assert.deepEqual(requests.map((r) => r.githubLogin).sort(), ["stranger", "teammate"]);
+  assert.equal((await as("stranger", "GET", "/admin/allowlist")).statusCode, 403);
+
+  // Letting the teammate in puts them on the list; dismissing the stranger hides them.
+  const teammate = requests.find((r) => r.githubLogin === "teammate")!;
+  const after = (await as("boss", "POST", `/admin/requests/${teammate.id}/allow`)).json() as { entries: AllowEntry[]; requests: AccessRequest[] };
+  assert.ok(after.entries.some((e) => e.githubLogin === "teammate"));
+  assert.deepEqual(after.requests.map((r) => r.githubLogin), ["stranger"]);
+  assert.equal((await as("teammate", "GET", "/me")).statusCode, 200);
+  const stranger = after.requests[0]!;
+  assert.deepEqual((await as("boss", "DELETE", `/admin/requests/${stranger.id}`)).json().requests, []);
+  assert.equal((await as("boss", "POST", `/admin/requests/${stranger.id}/allow`)).statusCode, 404);
 });

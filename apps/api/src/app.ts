@@ -135,6 +135,8 @@ export async function buildApp(deps: Deps) {
       if (deps.access) {
         const a = await deps.access.check(req.user);
         if (!a.allowed) {
+          // Admins see who's waiting, and let them in from /admin.
+          await deps.access.request(req.user).catch((err) => req.log.warn({ err }, "couldn't record the access request"));
           return reply.code(403).send({ error: `AgentFloor is invite-only for now. Ask to have ${req.user.githubLogin ?? req.user.email ?? "your account"} added.`, code: "not_allowed" });
         }
         (req as FastifyRequest & { admin?: boolean }).admin = a.admin;
@@ -169,15 +171,33 @@ export async function buildApp(deps: Deps) {
       if (!isAdmin(req) || !deps.admin) return reply.code(403).send({ error: "admins only" });
       return { errors: await deps.admin.errors(Math.min(500, Number(req.query.limit ?? 100) || 100)) };
     });
+    const people = async (access: Access) => ({ entries: await access.list(), requests: await access.requests() });
     authed.get("/admin/allowlist", async (req, reply) => {
       if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
-      return { entries: await deps.access.list() };
+      return people(deps.access);
+    });
+    /** Lets in someone who asked (their request then drops off the list). */
+    authed.post<{ Params: { id: string } }>("/admin/requests/:id/allow", async (req, reply) => {
+      if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
+      const r = (await deps.access.requests()).find((x) => x.id === Number(req.params.id));
+      if (!r) return reply.code(404).send({ error: "That request is gone (already let in or dismissed)." });
+      try {
+        await deps.access.add(r.githubLogin ? { githubLogin: r.githubLogin, note: r.name ?? undefined } : { email: r.email ?? undefined, note: r.name ?? undefined });
+      } catch (err) {
+        return reply.code(400).send({ error: (err as Error).message });
+      }
+      return people(deps.access);
+    });
+    authed.delete<{ Params: { id: string } }>("/admin/requests/:id", async (req, reply) => {
+      if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
+      await deps.access.dismiss(Number(req.params.id));
+      return people(deps.access);
     });
     authed.post<{ Body: { githubLogin?: string; email?: string; note?: string; admin?: boolean } }>("/admin/allowlist", async (req, reply) => {
       if (!isAdmin(req) || !deps.access) return reply.code(403).send({ error: "admins only" });
       try {
         await deps.access.add({ githubLogin: req.body?.githubLogin?.trim(), email: req.body?.email?.trim(), note: req.body?.note, admin: req.body?.admin });
-        return { entries: await deps.access.list() };
+        return people(deps.access);
       } catch (err) {
         return reply.code(400).send({ error: (err as Error).message });
       }
@@ -189,7 +209,7 @@ export async function buildApp(deps: Deps) {
       // Never lock the last admin out.
       if (target?.admin && entries.filter((e) => e.admin).length <= 1) return reply.code(400).send({ error: "That's the last admin." });
       await deps.access.remove(Number(req.params.id));
-      return { entries: await deps.access.list() };
+      return people(deps.access);
     });
     authed.post("/admin/backup", async (req, reply) => {
       if (!isAdmin(req) || !deps.backup) return reply.code(403).send({ error: "admins only" });

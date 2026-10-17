@@ -8,11 +8,15 @@ import {
   adminAllowlist,
   adminBackup,
   adminDisallow,
+  adminDismiss,
   adminErrors,
+  adminLetIn,
   adminOverview,
   ApiError,
   type AdminError,
+  type AccessRequest,
   type AdminOverview,
+  type AdminPeople,
   type AllowEntry,
 } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
@@ -40,6 +44,11 @@ export default function Admin() {
   const [overview, setOverview] = useState<AdminOverview | null>(null);
   const [errors, setErrors] = useState<AdminError[]>([]);
   const [allow, setAllow] = useState<AllowEntry[]>([]);
+  const [requests, setRequests] = useState<AccessRequest[]>([]);
+  const setPeople = (p: AdminPeople) => {
+    setAllow(p.entries);
+    setRequests(p.requests);
+  };
   const [open, setOpen] = useState<number | null>(null);
   const [who, setWho] = useState("");
   const [note, setNote] = useState("");
@@ -51,6 +60,7 @@ export default function Admin() {
       setOverview(o);
       setErrors(e.errors);
       setAllow(a.entries);
+      setRequests(a.requests);
       setState("ready");
     } catch (err) {
       if (err instanceof ApiError && (err.status === 403 || err.status === 401)) setState("denied");
@@ -182,6 +192,51 @@ export default function Admin() {
 
         <aside className="flex flex-col gap-6">
           <section>
+            <h2 className="flex items-center gap-1.5 text-[13px] font-semibold text-muted">
+              Asking to join
+              {requests.length > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-bold text-white">{requests.length}</span>}
+            </h2>
+            <div className="mt-2 rounded-[16px] bg-white p-2 ring-1 ring-black/[0.06]">
+              {requests.map((r) => (
+                <div key={r.id} className="flex items-center gap-2.5 rounded-[10px] px-2 py-1.5 text-[12.5px] hover:bg-[#f6f5f2]">
+                  {r.githubLogin ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`https://github.com/${r.githubLogin}.png?size=64`} alt="" className="h-8 w-8 shrink-0 rounded-full bg-[#f2f0ec]" />
+                  ) : (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#f2f0ec] text-[12px] font-bold text-muted">{(r.name ?? r.email ?? "?")[0]!.toUpperCase()}</span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    {r.githubLogin ? (
+                      <a href={`https://github.com/${r.githubLogin}`} target="_blank" rel="noreferrer" className="font-semibold text-ink hover:underline">
+                        {r.githubLogin}
+                      </a>
+                    ) : (
+                      <span className="font-semibold text-ink">{r.email}</span>
+                    )}
+                    <span className="block truncate text-[11.5px] text-faint">
+                      {[r.name, r.githubLogin && r.email].filter(Boolean).join(" · ")}
+                      {r.name || (r.githubLogin && r.email) ? " · " : ""}tried {ago(r.lastAt)}
+                    </span>
+                  </span>
+                  <button
+                    onClick={() => adminLetIn(r.id).then(setPeople, (e) => setMsg((e as Error).message))}
+                    className="shrink-0 rounded-[8px] bg-ink px-2.5 py-1 text-[11.5px] font-semibold text-white hover:bg-black"
+                  >
+                    Let in
+                  </button>
+                  <button
+                    onClick={() => adminDismiss(r.id).then(setPeople, (e) => setMsg((e as Error).message))}
+                    className="shrink-0 text-[11.5px] font-semibold text-muted hover:text-bad"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              ))}
+              {!requests.length && <p className="px-2 py-1.5 text-[12.5px] text-faint">Nobody waiting. People who sign in without an invite show up here.</p>}
+            </div>
+          </section>
+
+          <section>
             <h2 className="text-[13px] font-semibold text-muted">Who may sign in</h2>
             <div className="mt-2 rounded-[16px] bg-white p-2 ring-1 ring-black/[0.06]">
               {allow.map((a) => (
@@ -192,7 +247,7 @@ export default function Admin() {
                     {a.note && <span className="block truncate text-[11.5px] text-faint">{a.note}</span>}
                   </span>
                   <button
-                    onClick={() => adminDisallow(a.id).then((r) => setAllow(r.entries), (e) => setMsg((e as Error).message))}
+                    onClick={() => adminDisallow(a.id).then(setPeople, (e) => setMsg((e as Error).message))}
                     className="shrink-0 text-[11.5px] font-semibold text-muted hover:text-bad"
                   >
                     Remove
@@ -207,7 +262,7 @@ export default function Admin() {
                   if (!v) return;
                   void adminAllow(v.includes("@") ? { email: v, note } : { githubLogin: v, note }).then(
                     (r) => {
-                      setAllow(r.entries);
+                      setPeople(r);
                       setWho("");
                       setNote("");
                     },

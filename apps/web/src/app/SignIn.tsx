@@ -107,7 +107,75 @@ function Point({ icon, children }: { icon: ReactNode; children: ReactNode }) {
 }
 
 /** Signing in, over the office building itself. */
-export function SignIn({ state, error, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "not-allowed" | "error"; error?: string; onSignIn: () => void; onSignOut: () => void }) {
+type Who = { login: string | null; name: string | null; avatar: string | null; email: string | null };
+
+/** Signed in, but not invited yet: who they are, that the admins know, and that this page will let them in by itself. */
+function Waiting({ who, checking, onCheckAgain, onSignOut }: { who?: Who; checking?: boolean; onCheckAgain?: () => void; onSignOut: () => void }) {
+  const handle = who?.login ? `@${who.login}` : (who?.email ?? "your account");
+  return (
+    <div className="rounded-[22px] bg-white p-4 shadow-[0_12px_32px_-20px_rgba(0,0,0,0.35)] ring-1 ring-black/[0.06]">
+      <div className="flex items-center gap-3">
+        <div className="relative shrink-0">
+          {who?.avatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={who.avatar} alt="" className="h-11 w-11 rounded-full bg-[#f2f0ec] ring-2 ring-white" />
+          ) : (
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-[#f2f0ec] text-[16px] font-bold text-muted">{(who?.name ?? who?.login ?? "?")[0]!.toUpperCase()}</span>
+          )}
+          <span className="absolute -bottom-0.5 -right-0.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#f4b740] text-[10px] ring-2 ring-white">⏳</span>
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-semibold text-ink">{who?.name ?? who?.login ?? "Signed in"}</p>
+          <p className="flex items-center gap-1.5 truncate text-[12.5px] text-faint">
+            <BrandIcon name="GitHub" size={12} mono />
+            {handle}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-3.5 rounded-[14px] bg-[#fdf6e7] px-3.5 py-3">
+        <p className="flex items-center gap-2 text-[13.5px] font-semibold text-[#7a5410]">
+          <span className="h-2 w-2 rounded-full bg-[#e0a21f]" style={{ animation: "led 1.4s steps(2) infinite" }} />
+          You&apos;re on the waiting list
+        </p>
+        <p className="mt-1 text-[13px] leading-snug text-[#6b5a3a]">
+          AgentFloor is invite-only for now, and the admins can see you asked. As soon as they let you in, this page opens your office. No need to sign in again.
+        </p>
+      </div>
+
+      <div className="mt-3.5 flex items-center justify-between gap-3">
+        <button
+          onClick={onCheckAgain}
+          disabled={checking}
+          className="flex h-10 items-center gap-2 rounded-full bg-ink px-4 text-[13.5px] font-semibold text-white transition hover:bg-black disabled:opacity-60"
+        >
+          {checking ? "Checking…" : "Check again"}
+        </button>
+        <button onClick={onSignOut} className="text-[12.5px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline">
+          Use another account
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function SignIn({
+  state,
+  error,
+  who,
+  checking,
+  onSignIn,
+  onSignOut,
+  onCheckAgain,
+}: {
+  state: "loading" | "signed-out" | "not-allowed" | "error";
+  error?: string;
+  who?: Who;
+  checking?: boolean;
+  onSignIn: () => void;
+  onSignOut: () => void;
+  onCheckAgain?: () => void;
+}) {
   const scene = useStory();
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -167,16 +235,21 @@ export function SignIn({ state, error, onSignIn, onSignOut }: { state: "loading"
                   {error && <p className="mt-3 rounded-[12px] bg-[#fdecea] px-3.5 py-2.5 text-[13px] text-[#9b2c24]">{error}</p>}
                 </motion.div>
               )}
-              {(state === "not-allowed" || state === "error") && (
+              {state === "not-allowed" && (
+                <motion.div key="waiting" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <Waiting who={who} checking={checking} onCheckAgain={onCheckAgain} onSignOut={onSignOut} />
+                </motion.div>
+              )}
+              {state === "error" && (
                 <motion.div key="blocked" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="rounded-[18px] bg-white p-4 ring-1 ring-black/[0.06]">
-                  <p className="text-[14px] leading-snug text-ink-2">{state === "error" ? `Couldn't open your office: ${error}` : error}</p>
+                  <p className="text-[14px] leading-snug text-ink-2">Couldn&apos;t open your office: {error}</p>
                   <button onClick={onSignOut} className="mt-3 text-[13px] font-semibold text-muted underline-offset-2 hover:text-ink hover:underline">
                     Sign out
                   </button>
                 </motion.div>
               )}
             </AnimatePresence>
-            <p className="mt-4 text-[12px] leading-relaxed text-faint">Invite-only for now. Your agents run on your own Claude plan; you&apos;ll connect it in a minute.</p>
+            {state !== "not-allowed" && <p className="mt-4 text-[12px] leading-relaxed text-faint">Invite-only for now. Your agents run on your own Claude plan; you&apos;ll connect it in a minute.</p>}
           </div>
         </div>
       </div>

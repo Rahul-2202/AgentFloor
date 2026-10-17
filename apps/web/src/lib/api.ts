@@ -260,9 +260,21 @@ export interface AllowEntry {
 }
 export const adminOverview = () => api<AdminOverview>("/admin/overview");
 export const adminErrors = () => api<{ errors: AdminError[] }>("/admin/errors?limit=150");
-export const adminAllowlist = () => api<{ entries: AllowEntry[] }>("/admin/allowlist");
-export const adminAllow = (e: { githubLogin?: string; email?: string; note?: string; admin?: boolean }) => post<{ entries: AllowEntry[] }>("/admin/allowlist", e);
-export const adminDisallow = (id: number) => api<{ entries: AllowEntry[] }>(`/admin/allowlist/${id}`, { method: "DELETE" });
+/** Someone who signed in but isn't on the allowlist yet. */
+export interface AccessRequest {
+  id: number;
+  githubLogin: string | null;
+  email: string | null;
+  name: string | null;
+  firstAt: string;
+  lastAt: string;
+}
+export type AdminPeople = { entries: AllowEntry[]; requests: AccessRequest[] };
+export const adminAllowlist = () => api<AdminPeople>("/admin/allowlist");
+export const adminAllow = (e: { githubLogin?: string; email?: string; note?: string; admin?: boolean }) => post<AdminPeople>("/admin/allowlist", e);
+export const adminDisallow = (id: number) => api<AdminPeople>(`/admin/allowlist/${id}`, { method: "DELETE" });
+export const adminLetIn = (requestId: number) => post<AdminPeople>(`/admin/requests/${requestId}/allow`, {});
+export const adminDismiss = (requestId: number) => api<AdminPeople>(`/admin/requests/${requestId}`, { method: "DELETE" });
 export const adminBackup = () => post<{ offices: number }>("/admin/backup", {});
 
 /* ------------------------------------------------------------------ Claude */
