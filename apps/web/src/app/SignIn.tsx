@@ -159,6 +159,21 @@ function Waiting({ who, checking, onCheckAgain, onSignOut }: { who?: Who; checki
   );
 }
 
+/** The office's own first frame (same floor colour), with the logo if it takes a moment. */
+export function Splash() {
+  return (
+    <div className="fixed inset-0 grid place-items-center bg-[#e9e3d8]">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 0.4 }} className="flex flex-col items-center gap-3">
+        <LogoMark size={36} />
+        <span className="flex items-center gap-2 text-[13px] text-muted">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent" style={{ animation: "led 1.2s steps(2) infinite" }} />
+          Opening your office…
+        </span>
+      </motion.div>
+    </div>
+  );
+}
+
 export function SignIn({
   state,
   error,
@@ -168,7 +183,7 @@ export function SignIn({
   onSignOut,
   onCheckAgain,
 }: {
-  state: "loading" | "signed-out" | "not-allowed" | "error";
+  state: "signed-out" | "not-allowed" | "error";
   error?: string;
   who?: Who;
   checking?: boolean;
@@ -217,12 +232,6 @@ export function SignIn({
 
           <div>
             <AnimatePresence mode="wait">
-              {state === "loading" && (
-                <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex h-[52px] items-center gap-2 text-[14px] text-muted">
-                  <span className="h-2 w-2 rounded-full bg-accent" style={{ animation: "led 1.2s steps(2) infinite" }} />
-                  Opening your office…
-                </motion.div>
-              )}
               {state === "signed-out" && (
                 <motion.div key="out" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
                   <button
