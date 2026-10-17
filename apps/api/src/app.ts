@@ -67,7 +67,8 @@ declare module "fastify" {
 
 export async function buildApp(deps: Deps) {
   const app = Fastify({ logger: deps.logger ?? false });
-  await app.register(cors, { origin: deps.webOrigins, credentials: false });
+  // The browser uses PATCH (memory edits) and DELETE (the allowlist) too; the default allows only GET, HEAD and POST.
+  await app.register(cors, { origin: deps.webOrigins, credentials: false, methods: ["GET", "HEAD", "POST", "PATCH", "DELETE"] });
 
   await app.register(websocket, { options: { maxPayload: 4 * 1024 * 1024 } });
 
