@@ -160,10 +160,19 @@ export function World() {
     setTimeout(() => setPanned(false), 0);
   }, [panX, panY]);
 
-  // Walking brings the camera back to you.
+  // Walking with the keys brings the camera back to you. Walking somewhere you
+  // clicked keeps the view where you were looking (that's where you're going).
+  const clickWalk = useRef(false);
   useEffect(() => {
-    if (player.walking && (panX.get() !== 0 || panY.get() !== 0)) recenterCam();
+    if (!player.walking) {
+      clickWalk.current = false;
+      return;
+    }
+    if (!clickWalk.current && (panX.get() !== 0 || panY.get() !== 0)) recenterCam();
   }, [player.walking, panX, panY, recenterCam]);
+  // A click on the floor walks there a moment later, unless a drag starts first
+  // (trackpads with tap-to-click begin a drag with a tap, which is a click).
+  const walkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Looks at another part of the office: the camera can reach every corner of the floor. */
@@ -312,6 +321,7 @@ export function World() {
       ui.setCard(id);
       return;
     }
+    clickWalk.current = true;
     player.goTo(ax, ay + 1.1, () => {
       cardBy.current = "click";
       ui.setCard(id);
@@ -373,10 +383,15 @@ export function World() {
   return (
     <div
       ref={root}
-      className="absolute inset-0"
-      style={{ cursor: grabbing ? "grabbing" : "grab" }}
+      className="absolute inset-0 select-none"
+      style={{ cursor: grabbing ? "grabbing" : "grab", touchAction: "none" }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
+        // A drag starting right after a tap: the tap was its start, not a walk.
+        if (walkTimer.current) {
+          clearTimeout(walkTimer.current);
+          walkTimer.current = null;
+        }
         down.current = { x: e.clientX, y: e.clientY, px: panX.get(), py: panY.get() };
         dragged.current = false;
       }}
@@ -410,11 +425,16 @@ export function World() {
         follow={{ x: player.x, y: player.y, zoom, panX, panY }}
         onFloorClick={(x, y) => {
           if (dragged.current) return;
-          if (cardBy.current === "click") {
-            ui.setCard(null);
-            cardBy.current = null;
-          }
-          player.goTo(x, y);
+          if (walkTimer.current) clearTimeout(walkTimer.current);
+          walkTimer.current = setTimeout(() => {
+            walkTimer.current = null;
+            if (cardBy.current === "click") {
+              ui.setCard(null);
+              cardBy.current = null;
+            }
+            clickWalk.current = true;
+            player.goTo(x, y);
+          }, 250);
         }}
         agentHandlers={handlers}
       >

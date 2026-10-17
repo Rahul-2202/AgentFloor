@@ -475,7 +475,8 @@ export function Office({
           scale: s,
           transformOrigin: "0 0",
           opacity: size ? 1 : 0,
-          cursor: onFloorClick ? "pointer" : undefined,
+          // Following someone (the office app): the floor is grabbed to look around, so no click cursor.
+          cursor: onFloorClick && !follow ? "pointer" : undefined,
         }}
         onClick={onClickWorld}
       >
