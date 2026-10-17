@@ -116,6 +116,11 @@ function Machine() {
     <div data-tour="machine" className="flex items-center gap-1.5 text-[11px] text-muted">
       <span className={`h-1.5 w-1.5 rounded-full ${m.tone}`} style={s.machine === "started" ? { animation: "led 1.6s steps(2) infinite" } : undefined} />
       {m.label} · {clockLabel(s.now)}
+      {s.claude?.required && (!s.claude.set || s.claude.status === "invalid") && (
+        <button onClick={() => act.askClaude(true)} className="ml-1 rounded-full bg-[#fdecea] px-1.5 font-semibold text-[#9b2c24]">
+          Claude token needed
+        </button>
+      )}
       {s.machine === "started" ? (
         <button onClick={() => void act.pause()} className="ml-1 rounded-full px-1.5 font-semibold text-faint hover:bg-black/5 hover:text-ink" title="Agents stop until you start it again">
           Pause

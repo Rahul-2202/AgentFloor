@@ -64,6 +64,20 @@ export class GitHubApp {
     return { account: r.account.login, type: r.account.type };
   }
 
+  /**
+   * Whether a GitHub user is an active member of an organization (asked with the
+   * org's installation; needs the app's "Members: read" permission).
+   */
+  async orgMember(installationId: string, org: string, login: string): Promise<"member" | "not_member" | "unknown"> {
+    const t = await this.installationToken(installationId);
+    const res = await fetch(`${this.api}/orgs/${encodeURIComponent(org)}/memberships/${encodeURIComponent(login)}`, {
+      headers: { accept: "application/vnd.github+json", authorization: `Bearer ${t}`, "x-github-api-version": "2022-11-28" },
+    });
+    if (res.status === 200) return ((await res.json()) as { state?: string }).state === "active" ? "member" : "not_member";
+    if (res.status === 404) return "not_member";
+    return "unknown"; // 403: the app can't read the org's members (permission not granted yet)
+  }
+
   /** The app's installations (who has it installed). */
   async installations(): Promise<{ id: string; account: string; type: "User" | "Organization" }[]> {
     const r = await this.call<{ id: number; account: { login: string; type: "User" | "Organization" } }[]>("GET", "/app/installations?per_page=100", await this.appJwt());

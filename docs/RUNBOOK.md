@@ -6,7 +6,8 @@ How to keep offices running, and what to do when one isn't. **Admin dashboard:**
 
 - **Web** (Next.js, Railway) talks to the **API** (Fastify, Railway) and reads its own office's rows from **Supabase** (row-level security).
 - Each office has one **machine** on **Daytona**, created from the office snapshot. Its daemon dials *out* to the API over the office link (`wss://<api>/office-link`) with the office token.
-- The API stores the office's events, projects them into tables, runs Ada (Claude Agent SDK on the company Claude login), GitHub and Linear.
+- The API stores the office's events, projects them into tables, runs Ada, GitHub and Linear.
+- **Claude:** each office runs on its CEO's own Claude login (`claude setup-token`, their Pro, Max or Team plan): Ada's calls for that office, and its agents, through a per-office Daytona secret limited to `api.anthropic.com`. An office can't start without one; when Claude refuses it, the office asks for a new one.
 - The API ships the office code to the machine on every start: deploying the API updates offices the next time they start.
 
 ## Office machines
@@ -53,7 +54,7 @@ All secrets live in Railway variables (and locally in `.env`), never in the repo
 | `SUPABASE_SECRET_KEY` | API | Supabase → API keys → new secret key → Railway → redeploy API. Linear webhook secrets derive from it: reconnect Linear afterwards. |
 | `SUPABASE_PUBLISHABLE_KEY` | web | Supabase → API keys → Railway → redeploy web. |
 | `DAYTONA_API_KEY` | API | Daytona → keys → Railway → redeploy API. |
-| `AGENTFLOOR_CLAUDE_TOKEN` | API and the Daytona secret `agentfloor-claude-token` | `claude setup-token` → update both → redeploy API; restart offices. |
+| Each office's Claude token | The CEO's own (`claude setup-token`), in Supabase Vault and the office's Daytona secret `agentfloor-claude-<office id>` | The CEO pastes a new one (Rules & settings → Integrations → Claude, or the pop-up when Claude refuses the old one). It reaches the machine on its next start. |
 | `GITHUB_APP_PRIVATE_KEY` | API | GitHub → the app → Private keys → generate, update Railway, delete the old key. |
 | `GITHUB_WEBHOOK_SECRET` | API, and the GitHub App's webhook | Change both together. |
 | `LINEAR_API_KEY` | API | Linear → Settings → API → new key → Railway → redeploy. Webhooks keep working. |

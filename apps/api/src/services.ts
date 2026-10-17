@@ -16,6 +16,7 @@ import { GitHubService, type GitHubStore } from "./github/service.ts";
 import type { LinearClient } from "./linear/client.ts";
 import { LinearSync, type LinearStore, type TaskLike, type TicketRequest } from "./linear/service.ts";
 import type { ErrorLog } from "./ops/ops.ts";
+import { looksLikeAuthFailure, type ClaudeTokens } from "./claude/tokens.ts";
 import { OfficeHub } from "./link/hub.ts";
 import type { LinkStore } from "./link/store.ts";
 import { Watchers } from "./live/watchers.ts";
@@ -53,6 +54,8 @@ export function createServices(o: {
   machine: MachineConfig | null;
   /** The GitHub App; null until it's configured. */
   github?: { app: GitHubApp; cloneUrlOf?: (fullName: string) => string } | null;
+  /** Each office's own Claude login (Ada and the office machine run on it). */
+  claude?: ClaudeTokens | null;
   /** Where problems are tracked (errors table). */
   errors?: ErrorLog;
   /** Linear; null until a key is configured. */
@@ -103,7 +106,16 @@ export function createServices(o: {
     memory && o.stores.conversations ? new OfficeMemory({ memory, setups: o.stores.setups, hub, source: o.stores.conversations }) : null;
 
   const ada =
-    o.ada && memory && o.stores.data ? new Ada({ brain: o.ada.brain, setup, memory, hub, data: o.stores.data, spend: o.stores.budgets }) : null;
+    o.ada && memory && o.stores.data ? new Ada({
+          brain: o.ada.brain,
+          setup,
+          memory,
+          hub,
+          data: o.stores.data,
+          spend: o.stores.budgets,
+          token: o.claude ? (id) => o.claude!.need(id) : undefined,
+          onAuthFailure: o.claude ? (id, why) => o.claude!.refused(id, why) : undefined,
+        }) : null;
   const meetings = ada && memory && o.stores.data ? new Meetings({ ada, data: o.stores.data, hub, memory, setup, log }) : null;
   // New inbox items get Ada's triage, a little after they arrive (they come in bursts).
   const triageTimers = new Map<string, NodeJS.Timeout>();
@@ -137,7 +149,11 @@ export function createServices(o: {
     log(`${what}: ${err.message}`);
     o.errors?.record("api", `${what}: ${err.message}`, { stack: err.stack });
   };
-  hub.onLog = (id, _level, message) => o.errors?.record("office", message, { officeId: id });
+  hub.onLog = (id, _level, message) => {
+    o.errors?.record("office", message, { officeId: id });
+    // An agent's Claude login was refused: the office asks its CEO for a new token.
+    if (o.claude && looksLikeAuthFailure(message)) void o.claude.refused(id, message).catch(() => {});
+  };
   // A daemon (re)connects: give it its setup, catch the tables up, re-check budgets.
   hub.onConnect = (id) => {
     void setup.push(id).catch(warn("pushing setup"));
@@ -162,7 +178,7 @@ export function createServices(o: {
   hub.onLive = (id, ev) => watchers.broadcast(id, ev);
   if (machines) hub.onActivity = (id) => void machines.activity(id).catch(warn("keep-awake"));
 
-  return { hub, setup, projector, budgets, machines, watchers, github, linear, memory, officeMemory, ada, meetings, triageSoon, stores: o.stores };
+  return { hub, setup, projector, budgets, machines, watchers, github, linear, claude: o.claude ?? null, memory, officeMemory, ada, meetings, triageSoon, stores: o.stores };
 }
 
 export type Services = ReturnType<typeof createServices>;

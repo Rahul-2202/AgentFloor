@@ -11,6 +11,7 @@ import { supabaseGitHubStore } from "./github/service.ts";
 import { LinearClient } from "./linear/client.ts";
 import { supabaseLinearStore, supabaseTaskSource } from "./linear/service.ts";
 import { backupMemory, supabaseAccess, supabaseAdminData, supabaseErrorLog } from "./ops/ops.ts";
+import { ClaudeTokens, supabaseClaudeTokens, verifyWithAnthropic } from "./claude/tokens.ts";
 import { supabaseConversationSource } from "./memory/office.ts";
 import { supabaseMemoryStore } from "./memory/store.ts";
 import { supabaseLinkStore } from "./link/store.ts";
@@ -51,6 +52,13 @@ process.on("uncaughtException", (err) => {
   errors.record("api", `crash: ${err.message}`, { stack: err.stack });
   setTimeout(() => process.exit(1), 500); // let the record go out; Railway restarts the service
 });
+// Each office's own Claude login; its machine gets it as a Daytona secret limited to api.anthropic.com.
+const cloud = config.daytona ? daytonaCloud(config.daytona.apiKey) : null;
+const claude = new ClaudeTokens(supabaseClaudeTokens(db), {
+  syncSecret: cloud?.setSecret ? (name, token) => cloud.setSecret!(name, token, ["api.anthropic.com"]) : null,
+  verify: verifyWithAnthropic,
+  log,
+});
 const access = supabaseAccess(db);
 const admin = supabaseAdminData(db);
 const s = createServices({
@@ -75,16 +83,17 @@ const s = createServices({
     },
   },
   linear: config.linear ? { client: new LinearClient({ apiKey: config.linear.apiKey }), publicUrl: config.publicUrl, secret: config.supabaseSecretKey } : null,
-  ada: config.ada ? { brain: agentSdkBrain({ token: config.ada.token, model: config.ada.model, effort: config.ada.effort }) } : null,
+  ada: config.ada ? { brain: agentSdkBrain({ model: config.ada.model, effort: config.ada.effort }) } : null,
+  claude,
   github: config.github ? { app: new GitHubApp(config.github) } : null,
   machine: config.daytona
     ? {
-        cloud: daytonaCloud(config.daytona.apiKey),
+        cloud: cloud!,
         snapshot: config.daytona.snapshot,
         kind: config.daytona.kind,
         appDir: config.daytona.kind === "vm" ? "~/agentfloor" : "/opt/agentfloor",
         linkUrl: config.daytona.linkUrl,
-        claudeSecret: config.daytona.claudeSecret,
+        claudeSecret: (officeId: string) => claude.secretFor(officeId),
         // The daemon code from this deploy (same repo): office machines are brought up to it on start.
         code: daemonBundle(fileURLToPath(new URL("../../..", import.meta.url))),
         log,
@@ -103,6 +112,7 @@ const app = await buildApp({
   watchers: s.watchers,
   github: s.github,
   linear: s.linear,
+  claude,
   ada: s.ada,
   meetings: s.meetings,
   memory: s.memory,

@@ -58,6 +58,15 @@ export class GitHubService {
     if (inst.type === "User" && inst.account.toLowerCase() !== (user.githubLogin ?? "").toLowerCase()) {
       throw new GitHubUserError(`That installation belongs to ${inst.account}, not you.`);
     }
+    // An organization's: only its members (GitHub says whether this user is one).
+    if (inst.type === "Organization") {
+      if (!user.githubLogin) throw new GitHubUserError("Sign in with GitHub to connect an organization.");
+      const member = await this.app.orgMember(installationId, inst.account, user.githubLogin);
+      if (member === "not_member") throw new GitHubUserError(`You're not a member of ${inst.account} on GitHub.`);
+      if (member === "unknown") {
+        throw new GitHubUserError(`AgentFloor can't check who's in ${inst.account} yet: an owner of ${inst.account} needs to accept the app's "Members: read" permission on GitHub.`);
+      }
+    }
     const prev = await this.store.get(officeId);
     const link: GitHubLink = { installationId, account: inst.account, repo: prev?.installationId === installationId ? prev.repo : null, defaultBranch: prev?.defaultBranch ?? null };
     await this.store.save(officeId, link);

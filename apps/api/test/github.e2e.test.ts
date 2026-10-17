@@ -63,6 +63,12 @@ async function fakeGitHub() {
     };
     if (path === "/app/installations") return json(200, [{ id: 99, account: { login: "someone-else", type: "User" } }, { id: 42, account: { login: "ceo-login", type: "User" } }]);
     if (path === "/app/installations/42") return json(200, { account: { login: "ceo-login", type: "User" } });
+    if (path === "/app/installations/77") return json(200, { account: { login: "acme-org", type: "Organization" } });
+    if (path === "/app/installations/78") return json(200, { account: { login: "other-org", type: "Organization" } });
+    if (path === "/app/installations/79") return json(200, { account: { login: "locked-org", type: "Organization" } });
+    if (path === "/orgs/acme-org/memberships/ceo-login") return json(200, { state: "active", role: "member" });
+    if (path === "/orgs/other-org/memberships/ceo-login") return json(404, { message: "Not Found" });
+    if (path === "/orgs/locked-org/memberships/ceo-login") return json(403, { message: "Resource not accessible by integration" });
     if (path === "/app/installations/99") return json(200, { account: { login: "someone-else", type: "User" } });
     if (path.endsWith("/access_tokens")) return json(201, { token: `ghs_${body?.repositories?.[0] ?? "meta"}`, expires_at: new Date(Date.now() + 3600_000).toISOString() });
     if (path === "/installation/repositories") return json(200, { repositories: [{ full_name: "acme/web", default_branch: "main", private: true }] });
@@ -143,6 +149,12 @@ test("connect GitHub, pick a repo, agents work in worktrees, open a PR, the CEO 
 
   // Someone else's installation can't be claimed; the CEO's own can.
   assert.equal((await call("POST", "/office/github/connect", { installationId: "99" })).statusCode, 400);
+  // An organization's installation: only for its members.
+  const notMember = await call("POST", "/office/github/connect", { installationId: "78" });
+  assert.equal(notMember.statusCode, 400);
+  assert.match(notMember.json().error, /not a member of other-org/);
+  assert.match((await call("POST", "/office/github/connect", { installationId: "79" })).json().error, /Members: read/);
+  assert.equal((await call("POST", "/office/github/connect", { installationId: "77" })).statusCode, 200);
   const connected = await call("POST", "/office/github/connect", { installationId: "42" });
   assert.equal(connected.statusCode, 200, connected.body);
   assert.deepEqual((await call("GET", "/office/github/repos")).json().repos.map((r: any) => r.fullName), ["acme/web"]);

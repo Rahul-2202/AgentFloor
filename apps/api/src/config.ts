@@ -26,8 +26,10 @@ const schema = z.object({
   GITHUB_APP_PRIVATE_KEY: z.string().optional(),
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().optional(),
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
-  /** Ada runs on the company's Claude login (claude setup-token). Without it, Ada is off. */
+  /** Not used by offices any more: each office runs on its CEO's own Claude token. Kept for local scripts. */
   AGENTFLOOR_CLAUDE_TOKEN: z.string().optional(),
+  /** Ada is on unless this is "off" (she runs on each office's own Claude token). */
+  ADA: z.enum(["on", "off"]).default("on"),
   ADA_MODEL: z.string().default("haiku"),
   ADA_EFFORT: z.enum(["low", "medium", "high"]).default("low"),
   /** Linear (office tasks ↔ issues). Without a key, Linear features are off. */
@@ -48,7 +50,7 @@ export interface Config {
   webOrigins: string[];
   daytona: { apiKey: string; snapshot: string; kind: "container" | "vm"; claudeSecret: string; linkUrl: string } | null;
   github: { appId: string; slug: string; privateKey: string; webhookSecret: string } | null;
-  ada: { token: string; model: string; effort: "low" | "medium" | "high"; briefingHourUtc: number } | null;
+  ada: { model: string; effort: "low" | "medium" | "high"; briefingHourUtc: number } | null;
   linear: { apiKey: string } | null;
   /** The API's public https address, when it has one. */
   publicUrl: string | null;
@@ -73,7 +75,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     webOrigins: e.WEB_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean),
     daytona: daytonaConfig(e),
     github: githubConfig(e),
-    ada: e.AGENTFLOOR_CLAUDE_TOKEN ? { token: e.AGENTFLOOR_CLAUDE_TOKEN, model: e.ADA_MODEL, effort: e.ADA_EFFORT, briefingHourUtc: e.BRIEFING_HOUR_UTC } : null,
+    ada: e.ADA === "on" ? { model: e.ADA_MODEL, effort: e.ADA_EFFORT, briefingHourUtc: e.BRIEFING_HOUR_UTC } : null,
     linear: e.LINEAR_API_KEY ? { apiKey: e.LINEAR_API_KEY } : null,
     publicUrl: (e.PUBLIC_API_URL ?? (e.RAILWAY_PUBLIC_DOMAIN ? `https://${e.RAILWAY_PUBLIC_DOMAIN}` : null))?.replace(/\/$/, "") ?? null,
   };

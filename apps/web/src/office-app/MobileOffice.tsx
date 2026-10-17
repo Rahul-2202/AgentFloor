@@ -11,6 +11,7 @@ import { InboxPanel } from "./panels/Inbox";
 import { useUI } from "./ui";
 import { WindowRouter } from "./windows";
 import { ReadBackHost } from "./windows/ReadBack";
+import { ClaudeTokenDialog } from "./real/ClaudeTokenDialog";
 import { nameOf } from "./who";
 
 type Tab = "needs" | "rooms" | "work" | "ada";
@@ -115,6 +116,7 @@ export function MobileOffice() {
       </div>
       <WindowRouter />
       <ReadBackHost />
+      <ClaudeTokenDialog />
     </div>
   );
 }

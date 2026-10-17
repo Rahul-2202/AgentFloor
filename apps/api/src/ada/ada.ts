@@ -17,7 +17,8 @@ import type { OfficeHub } from "../link/hub.ts";
 import type { MemoryService } from "../memory/service.ts";
 import { PolicyError } from "../policy/engine.ts";
 import type { ClientOp, SetupService } from "../setup/service.ts";
-import type { AdaBrain, AdaTool } from "./brain.ts";
+import { looksLikeAuthFailure } from "../claude/tokens.ts";
+import type { AdaBrain, AdaTool, BrainRun } from "./brain.ts";
 import type { Card, ChatMessage, Meeting, Minutes, OfficeData } from "./data.ts";
 
 export type AdaEvent = { type: "text"; delta: string } | { type: "card"; card: Card } | { type: "done"; message: ChatMessage };
@@ -29,6 +30,10 @@ export interface AdaDeps {
   hub: OfficeHub;
   data: OfficeData;
   spend?: BudgetStore;
+  /** The office's Claude login; Ada runs on it (throws when it hasn't been added). */
+  token?: (officeId: string) => Promise<string>;
+  /** Claude refused the office's login. */
+  onAuthFailure?: (officeId: string, why: string) => Promise<void>;
 }
 
 const PERSONA = `You are Ada, the office manager of an AI company run from AgentFloor. The CEO is a person; everyone else in the office is an AI agent, organised in rooms, each with a head.
@@ -68,6 +73,25 @@ export class Ada {
 
   constructor(d: AdaDeps) {
     this.d = d;
+  }
+
+  /** One of Ada's model runs, on the office's own Claude login. */
+  private async run(officeId: string, r: BrainRun): Promise<{ text: string; costUsd: number }> {
+    const token = this.d.token ? await this.d.token(officeId) : undefined;
+    let out: { text: string; costUsd: number };
+    try {
+      out = await this.d.brain.run({ ...r, token });
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (looksLikeAuthFailure(msg)) await this.d.onAuthFailure?.(officeId, msg).catch(() => {});
+      throw err;
+    }
+    // Claude Code answers a bad login with text rather than an error.
+    if (looksLikeAuthFailure(out.text) && out.text.length < 400) {
+      await this.d.onAuthFailure?.(officeId, out.text).catch(() => {});
+      throw new Error("Your Claude token stopped working. Run `claude setup-token` again and paste the new one in Rules & settings → Integrations.");
+    }
+    return out;
   }
 
   /* ---------------------------------------------------------------- chat */
@@ -113,7 +137,7 @@ export class Ada {
       .filter(Boolean)
       .join("\n\n");
 
-    const { text } = await this.d.brain.run({
+    const { text } = await this.run(officeId, {
       system: [PERSONA, onboarding ? ONBOARDING : "", OPS_HELP].filter(Boolean).join("\n\n"),
       prompt,
       tools,
@@ -158,7 +182,7 @@ export class Ada {
       ["triage_inbox", "schedule_meeting", "decline_meeting", "read_thread", "list_tasks", "memory_search"].includes(t.name),
     );
     const list = items.map((i) => `- ${i.id} [${i.kind}] from ${i.from}: ${i.title}${i.body ? ` — ${i.body.slice(0, 400)}` : ""}${i.action ? ` (action: ${JSON.stringify(i.action)})` : ""}`).join("\n");
-    await this.d.brain.run({
+    await this.run(officeId, {
       system: PERSONA,
       prompt: `New items in the CEO's inbox:\n${list}\n\nTriage every one with triage_inbox: priority 1 (needs the CEO first: decisions blocking work, merges, permission asks), 2 (today), 3 (FYI), and a one-line note from you on top of each (what it is and what you recommend). Meeting requests: if a decision needs the CEO and heads together, schedule_meeting with an agenda and a pre-read (the question, the options, each side's position); otherwise decline_meeting with a reply that gets them unblocked.\n\nThe office now:\n${await this.overview(officeId)}`,
       tools,
@@ -169,7 +193,7 @@ export class Ada {
 
   /** The daily briefing: what shipped, what's blocked, what needs the CEO. An inbox item. */
   async briefing(officeId: string, day = new Date()): Promise<string> {
-    const { text } = await this.d.brain.run({
+    const { text } = await this.run(officeId, {
       system: PERSONA,
       prompt: `Write the CEO's daily briefing for ${day.toISOString().slice(0, 10)}, in three short parts: Shipped (done since yesterday), Blocked (and what unblocks it), Needs you (in priority order). Plain sentences, names not ids, under 200 words. Use the tools if you need detail.\n\nThe office now:\n${await this.overview(officeId)}`,
       tools: this.tools(officeId, { cards: [], mode: "job" }).filter((t) => ["list_tasks", "read_thread", "memory_search", "spend"].includes(t.name)),
@@ -195,7 +219,7 @@ export class Ada {
         return "Recorded.";
       },
     };
-    await this.d.brain.run({
+    await this.run(officeId, {
       system: PERSONA,
       prompt: [
         `Write the minutes of the meeting "${meeting.title}" for the CEO (attendees, by agent id: ${meeting.attendees.join(", ")}). Call record_minutes once.`,

@@ -44,7 +44,7 @@ export interface MachineOptions {
   /** wss://<api>/office-link, as the VM reaches it. */
   linkUrl: string;
   /** Provider secret holding the Claude credential (limited to api.anthropic.com). */
-  claudeSecret: string;
+  claudeSecret: string | ((officeId: string) => Promise<string>);
   /** "container" (stops when idle; the daemon restarts on start) or "vm" (pauses with memory kept). */
   kind?: "vm" | "container";
   /** Where the snapshot put the code. */
@@ -127,6 +127,9 @@ export class OfficeMachines {
     const log = this.o.log ?? (() => {});
     let m = await this.o.machines.get(officeId);
     let since = 0;
+    // The office runs on its CEO's own Claude login: refused (before anything starts) without one,
+    // and the machine's secret is refreshed from it on every start.
+    const claudeSecret = typeof this.o.claudeSecret === "function" ? await this.o.claudeSecret(officeId) : this.o.claudeSecret;
     try {
       // A machine deleted outside AgentFloor (or destroyed by the provider): start afresh.
       if (m.sandboxId) {
@@ -147,7 +150,7 @@ export class OfficeMachines {
           snapshot: this.o.snapshot,
           labels: { app: "agentfloor", office: officeId },
           env: { AGENTFLOOR_LINK_URL: this.o.linkUrl, AGENTFLOOR_OFFICE_TOKEN: token },
-          secrets: { AGENTFLOOR_CLAUDE_TOKEN: this.o.claudeSecret },
+          secrets: { AGENTFLOOR_CLAUDE_TOKEN: claudeSecret },
           kind: this.kind,
           idleMinutes: this.o.idleMinutes ?? 15,
         });

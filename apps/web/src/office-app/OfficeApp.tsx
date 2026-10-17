@@ -12,6 +12,7 @@ import { TopBar } from "./TopBar";
 import { UIProvider, useUI } from "./ui";
 import { WindowRouter } from "./windows";
 import { ReadBackHost } from "./windows/ReadBack";
+import { ClaudeTokenDialog } from "./real/ClaudeTokenDialog";
 import { World } from "./World";
 
 function Shell({ overlay, onboarding, onOnboarded }: { overlay?: ReactNode; onboarding: boolean; onOnboarded: () => void }) {
@@ -49,6 +50,7 @@ function DesktopShell({ overlay }: { overlay?: ReactNode }) {
       <PanelRouter />
       <WindowRouter />
       <ReadBackHost />
+      <ClaudeTokenDialog />
       {overlay}
     </div>
   );

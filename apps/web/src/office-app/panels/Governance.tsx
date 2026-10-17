@@ -8,6 +8,7 @@ import type { PermKey } from "@/sim/types";
 import { Bar, Btn, Empty, Face, Section, Toggle } from "../bits";
 import { GitHubCard } from "../real/GitHubCard";
 import { LinearCard } from "../real/LinearCard";
+import { ClaudeCard } from "../real/ClaudeTokenDialog";
 import { useUI } from "../ui";
 import { nameOf } from "../who";
 
@@ -251,6 +252,7 @@ export function GovernancePanel({ initial }: { initial?: string }) {
       <div data-anchor="github">
         <Section title="Integrations">
           <div className="flex flex-col gap-2">
+            <ClaudeCard />
             <GitHubCard />
             <LinearCard />
           </div>

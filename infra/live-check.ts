@@ -84,7 +84,13 @@ await check("M2", "GitHub App", async () => {
 });
 
 // M3: Ada (a model call costs tokens: only checks the credential is there).
-await check("M3", "Ada's Claude credential", async () => (env.AGENTFLOOR_CLAUDE_TOKEN ? "set (not called, to save tokens)" : { ok: false, detail: "AGENTFLOOR_CLAUDE_TOKEN not set" }));
+// M3: Claude. Each office runs on its CEO's own token (in Vault): how many have one, and how many Claude refused.
+await check("M3", "offices' Claude tokens", async () => {
+  const rows = await db("integrations?provider=eq.claude&select=office_id,config");
+  const offices = (await db("offices?select=id")).length;
+  const invalid = rows.filter((r) => r.config?.status === "invalid").length;
+  return { ok: invalid === 0, detail: `${rows.length} of ${offices} offices have one${invalid ? `, ${invalid} refused by Claude` : ""}` };
+});
 
 // M7: Linear.
 await check("M7", "Linear key", async () => {
