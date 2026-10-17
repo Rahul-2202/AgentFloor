@@ -12,6 +12,8 @@ export interface Cloud {
     kind: "vm" | "container";
     idleMinutes: number;
   }): Promise<{ id: string }>;
+  /** Creates or updates a secret machines get as a placeholder, swapped in only on requests to these hosts. */
+  setSecret?(name: string, value: string, hosts: string[]): Promise<void>;
   /** Makes sure a snapshot can be used (Daytona deactivates ones unused for a while). */
   ensureSnapshot?(name: string): Promise<void>;
   state(id: string): Promise<string>;
@@ -52,6 +54,12 @@ export function daytonaCloud(apiKey: string): Cloud {
         { timeout: 300 },
       );
       return { id: sandbox.id };
+    },
+    async setSecret(name, value, hosts) {
+      const existing = (await daytona.secret.list({ name })).items.find((x) => x.name === name);
+      const params = { value, hosts, description: "AgentFloor: an office's Claude login" };
+      if (existing) await daytona.secret.update(existing.id, params as never);
+      else await daytona.secret.create({ name, ...params } as never);
     },
     async ensureSnapshot(name) {
       // Unused snapshots go inactive; the first office start after that wakes it (a minute or two).

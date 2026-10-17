@@ -7,6 +7,7 @@ import { Office } from "@/office/Office";
 import type { AgentScene, RoomId, RoomState, Scene } from "@/office/types";
 import { Face } from "@/office-app/bits";
 import { GitHubCard } from "@/office-app/real/GitHubCard";
+import { ClaudeTokenDialog } from "@/office-app/real/ClaudeTokenDialog";
 import { SLOTS } from "@/sim/real";
 import { useSim } from "@/sim/store";
 import type { ChatCard, ChatMsg } from "@/sim/types";
@@ -90,12 +91,14 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const step = applied ? 6 : pendingCard ? 5 : Math.min(4, answers);
 
   // Ada opens the interview (once her past messages have loaded).
+  // Ada runs on the CEO's own Claude login: the interview starts once it's added.
+  const hasToken = !!s.claude && (!s.claude.required || s.claude.set);
   useEffect(() => {
-    if (started.current || !s.adaReady) return;
+    if (started.current || !s.adaReady || !hasToken) return;
     started.current = true;
     if (!msgs.length) void act.ada("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.adaReady]);
+  }, [s.adaReady, hasToken]);
 
   useEffect(() => {
     list.current?.scrollTo({ top: list.current.scrollHeight, behavior: "smooth" });
@@ -125,6 +128,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#e9e3d8]">
+      <ClaudeTokenDialog />
       <div className="absolute inset-0 lg:left-[440px]">
         <Office scene={sc} rounded={false} />
       </div>
@@ -154,7 +158,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         </div>
 
         <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-          {!msgs.length && <div className="m-auto text-[13px] text-faint">Ada is on her way…</div>}
+          {!msgs.length && <div className="m-auto text-[13px] text-faint">{hasToken ? "Ada is on her way…" : "Connect your Claude account to meet Ada."}</div>}
           {msgs.map((m) => (
             <Line key={m.id} m={m} />
           ))}
@@ -195,7 +199,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 autoFocus
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                disabled={s.adaBusy}
+                disabled={s.adaBusy || !hasToken}
                 placeholder={s.adaBusy ? "Ada is replying…" : "Answer Ada…"}
                 className="h-11 flex-1 rounded-full bg-[#f6f5f2] px-4 text-[14px] outline-none ring-1 ring-black/[0.05] focus:ring-black/20 disabled:opacity-60"
               />

@@ -14,6 +14,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useReducer,
 import {
   adaChat,
   answerPermission,
+  claudeStatus,
+  setClaudeToken,
+  type ClaudeStatus,
   applySetup,
   ApiError,
   confirmAdaCard,
@@ -75,6 +78,10 @@ export interface SimState {
   adaBusy: boolean;
   /** Ada's past conversation has loaded. */
   adaReady: boolean;
+  /** The office's own Claude login (null until checked). */
+  claude: ClaudeStatus | null;
+  /** The "add your Claude token" window is open. */
+  askClaude: boolean;
   /** Always the CEO in v1. */
   me: "you";
   /** Now, refreshed every half minute (for "x minutes ago" and the clock). */
@@ -192,6 +199,9 @@ export interface Acts {
   endMeeting: (id: string) => Promise<boolean>;
   start: () => Promise<void>;
   pause: () => Promise<void>;
+  /** Saves the CEO's Claude token; resolves to an error message, or null when it's saved. */
+  setClaude: (token: string) => Promise<string | null>;
+  askClaude: (on: boolean) => void;
   /** Reloads the setup (after anything that changes it). */
   refresh: () => void;
   toast: (text: string, who?: string) => void;
@@ -228,6 +238,17 @@ export function SimProvider({ office, fixture, children }: { office: Office; fix
   const [now, setNow] = useState(() => Date.now());
   const [bubbles, setBubbles] = useState<Record<string, string>>({});
   const [visits, setVisits] = useState<Record<string, string>>({});
+  // (The development preview: a brand-new office hasn't added its token yet.)
+  const [claude, setClaude] = useState<ClaudeStatus | null>(fixture ? { set: fixture.setup.agents.length > 0, last4: "abcd", status: "ok", setAt: null, required: true } : null);
+  const [askClaudeOpen, setAskClaude] = useState(false);
+  // The office's Claude login: checked now and then (agents can find it's stopped working).
+  useEffect(() => {
+    if (fixture) return;
+    const load = () => void claudeStatus().then(setClaude, () => {});
+    load();
+    const t = setInterval(load, 120_000);
+    return () => clearInterval(t);
+  }, [fixture]);
   // Outputs you've opened, remembered in this browser.
   const [viewed, setViewed] = useState<Set<string>>(() => new Set());
   useEffect(() => {
@@ -396,10 +417,12 @@ export function SimProvider({ office, fixture, children }: { office: Office; fix
       pending: o.pending,
       adaBusy: o.adaBusy,
       adaReady: o.adaReady,
+      claude,
+      askClaude: askClaudeOpen,
       me: "you",
       now,
     };
-  }, [officeId, office, setup, versions, data, spend, live.activity, bubbles, visits, layout, o, machine, now, viewed]);
+  }, [officeId, office, setup, versions, data, spend, live.activity, bubbles, visits, layout, o, machine, now, viewed, claude, askClaudeOpen]);
 
   /* -------- actions */
 
@@ -525,10 +548,27 @@ export function SimProvider({ office, fixture, children }: { office: Office; fix
         try {
           setMachine((await startOffice()).state);
         } catch (e) {
+          // No Claude token yet: ask for it instead of failing.
+          if (e instanceof ApiError && e.code === "claude_token") {
+            setMachine(ref.current.office.sandboxState);
+            setAskClaude(true);
+            return;
+          }
           setMachine("error");
           toast(errText(e));
         }
       },
+      setClaude: async (token) => {
+        try {
+          const st = await setClaudeToken(token);
+          setClaude({ ...st, required: true });
+          setAskClaude(false);
+          return null;
+        } catch (e) {
+          return errText(e);
+        }
+      },
+      askClaude: (on) => setAskClaude(on),
       pause: async () => {
         setMachine("stopped");
         try {

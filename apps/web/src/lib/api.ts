@@ -189,7 +189,8 @@ export interface LinearStatus {
   teams?: { id: string; key: string; name: string }[];
 }
 export const linearStatus = () => api<LinearStatus>("/office/linear");
-export const linearConnect = (teamId: string) => post<{ link: NonNullable<LinearStatus["link"]> & { warning?: string } }>("/office/linear/connect", { teamId });
+export const linearConnect = (teamId: string, projectId?: string | null) => post<{ link: NonNullable<LinearStatus["link"]> & { warning?: string } }>("/office/linear/connect", { teamId, projectId: projectId || null });
+export const linearProjects = (teamId: string) => api<{ projects: { id: string; name: string; url: string }[] }>(`/office/linear/projects?teamId=${encodeURIComponent(teamId)}`);
 export const linearDisconnect = () => post<unknown>("/office/linear/disconnect", {});
 
 /* -------------------------------------------------------------------- ops */
@@ -263,3 +264,17 @@ export const adminAllowlist = () => api<{ entries: AllowEntry[] }>("/admin/allow
 export const adminAllow = (e: { githubLogin?: string; email?: string; note?: string; admin?: boolean }) => post<{ entries: AllowEntry[] }>("/admin/allowlist", e);
 export const adminDisallow = (id: number) => api<{ entries: AllowEntry[] }>(`/admin/allowlist/${id}`, { method: "DELETE" });
 export const adminBackup = () => post<{ offices: number }>("/admin/backup", {});
+
+/* ------------------------------------------------------------------ Claude */
+
+export interface ClaudeStatus {
+  set: boolean;
+  last4: string | null;
+  status: "ok" | "invalid" | null;
+  setAt: string | null;
+  problem?: string | null;
+  /** Whether this server needs one (offices run on their CEO's own Claude login). */
+  required: boolean;
+}
+export const claudeStatus = () => api<ClaudeStatus>("/office/claude");
+export const setClaudeToken = (token: string) => post<ClaudeStatus>("/office/claude", { token });

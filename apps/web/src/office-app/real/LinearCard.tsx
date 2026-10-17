@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { BrandIcon } from "@/components/brands";
-import { linearConnect, linearDisconnect, linearStatus, type LinearStatus } from "@/lib/api";
+import { linearConnect, linearDisconnect, linearProjects, linearStatus, type LinearStatus } from "@/lib/api";
 import { useSim } from "@/sim/store";
 import { Btn } from "../bits";
 
@@ -11,6 +11,8 @@ export function LinearCard() {
   const { act } = useSim();
   const [status, setStatus] = useState<LinearStatus | null>(null);
   const [team, setTeam] = useState("");
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
+  const [project, setProject] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const load = () =>
@@ -21,6 +23,12 @@ export function LinearCard() {
   useEffect(() => {
     void load();
   }, []);
+  // The team's projects, to put the office's issues in one (or a new one).
+  useEffect(() => {
+    setProjects([]);
+    setProject("");
+    if (team && !status?.link) void linearProjects(team).then((r) => setProjects(r.projects), () => {});
+  }, [team, status?.link]);
   const link = status?.link;
 
   return (
@@ -64,6 +72,14 @@ export function LinearCard() {
               </option>
             ))}
           </select>
+          <select value={project} onChange={(e) => setProject(e.target.value)} className="min-w-0 flex-1 rounded-[12px] bg-[#f6f5f2] px-3 py-2 text-[13px] outline-none ring-1 ring-black/[0.06]">
+            <option value="">New project for this office</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
           <Btn
             tone="dark"
             className="!py-1 !text-[12px]"
@@ -72,7 +88,7 @@ export function LinearCard() {
               setBusy(true);
               setErr("");
               try {
-                const r = await linearConnect(team);
+                const r = await linearConnect(team, project || null);
                 act.toast(r.link.warning ?? `Connected to ${r.link.teamName}. Open tasks are getting issues now.`);
                 await load();
               } catch (e) {
@@ -91,7 +107,7 @@ export function LinearCard() {
           The office&apos;s project in Linear ↗
         </a>
       )}
-      {status?.configured && !link && <div className="mt-2 text-[11.5px] text-faint">Issues go into a new project named after the office. Label an issue &quot;AgentFloor&quot; in Linear to hand it to a room.</div>}
+      {status?.configured && !link && <div className="mt-2 text-[11.5px] text-faint">Pick your own project, or a new one named after your office is made. Label an issue &quot;AgentFloor&quot; in Linear to hand it to a room.</div>}
       {err && <div className="mt-2 text-[12px] text-bad">{err}</div>}
     </div>
   );

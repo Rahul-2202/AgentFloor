@@ -118,14 +118,19 @@ export class LinearSync {
   }
 
   /** Connects a team: a project for the office, labels, the webhook, then every open task gets an issue. */
-  async connect(officeId: string, teamId: string): Promise<LinearLink & { warning?: string }> {
+  async connect(officeId: string, teamId: string, projectId?: string | null): Promise<LinearLink & { warning?: string }> {
     const team = await this.client.team(teamId).catch((err: Error) => {
       throw new LinearUserError(`Can't use that team: ${err.message}`);
     });
     const labels: Record<string, string> = {};
     for (const l of team.labels) labels[l.name] = l.id;
     if (!labels[LABEL]) labels[LABEL] = await this.client.createLabel(team.id, LABEL, "#e8743b");
-    const project = await this.client.createProject(team.id, `${await this.o.officeName(officeId)} (AgentFloor)`).catch(() => null);
+    // The office's issues go in a project: one the CEO picked, or a new one named after the office.
+    let project: { id: string; url: string } | null = null;
+    if (projectId) {
+      project = (await this.client.projects(team.id)).find((p) => p.id === projectId) ?? null;
+      if (!project) throw new LinearUserError("That project isn't in this team.");
+    } else project = await this.client.createProject(team.id, `${await this.o.officeName(officeId)} (AgentFloor)`).catch(() => null);
     let webhookId: string | null = null;
     let warning: string | undefined;
     if (this.o.publicUrl) {

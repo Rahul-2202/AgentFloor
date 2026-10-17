@@ -47,6 +47,14 @@ export class LinearClient {
     return { ...r.team, states: r.team.states.nodes, labels: r.team.labels.nodes };
   }
 
+  async projects(teamId: string): Promise<{ id: string; name: string; url: string }[]> {
+    const r = await this.q<{ team: { projects: { nodes: { id: string; name: string; url: string }[] } } }>(
+      `query($id: String!) { team(id: $id) { projects(first: 100) { nodes { id name url } } } }`,
+      { id: teamId },
+    );
+    return r.team.projects.nodes;
+  }
+
   async createLabel(teamId: string, name: string, color: string): Promise<string> {
     const r = await this.q<{ issueLabelCreate: { issueLabel: { id: string } } }>(
       `mutation($i: IssueLabelCreateInput!) { issueLabelCreate(input: $i) { issueLabel { id } } }`,

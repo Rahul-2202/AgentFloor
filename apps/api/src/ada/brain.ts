@@ -21,6 +21,8 @@ export interface BrainRun {
   maxTurns?: number;
   /** Text as it's written, for streaming replies. */
   onText?: (delta: string) => void;
+  /** The office's own Claude login (its CEO's `claude setup-token`). */
+  token?: string;
 }
 
 export interface AdaBrain {
@@ -38,7 +40,7 @@ export async function callTool(t: AdaTool, args: unknown): Promise<{ text: strin
   }
 }
 
-export function agentSdkBrain(o: { token: string; model?: string; effort?: "low" | "medium" | "high" }): AdaBrain {
+export function agentSdkBrain(o: { token?: string; model?: string; effort?: "low" | "medium" | "high" }): AdaBrain {
   return {
     async run(r) {
       const server = createSdkMcpServer({
@@ -67,7 +69,7 @@ export function agentSdkBrain(o: { token: string; model?: string; effort?: "low"
           settingSources: [],
           includePartialMessages: !!r.onText,
           cwd: process.env.TMPDIR ?? "/tmp",
-          env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: o.token, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } as Record<string, string>,
+          env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: r.token ?? o.token ?? "", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" } as Record<string, string>,
         },
       });
       for await (const m of q as AsyncIterable<any>) {

@@ -17,6 +17,7 @@ import { PolicyError } from "./policy/engine.ts";
 import type { ClientOp, SetupService } from "./setup/service.ts";
 import { LinearUserError, type LinearSync } from "./linear/service.ts";
 import type { Access, AdminData, ErrorLog } from "./ops/ops.ts";
+import { ClaudeTokenError, type ClaudeTokens } from "./claude/tokens.ts";
 import { LinearError } from "./linear/client.ts";
 import { StaleSetupError } from "./setup/store.ts";
 
@@ -32,6 +33,8 @@ export interface Deps {
   watchers?: Watchers;
   github?: GitHubService | null;
   linear?: LinearSync | null;
+  /** Each office's own Claude login. */
+  claude?: ClaudeTokens | null;
   ada?: Ada | null;
   meetings?: Meetings | null;
   memory?: MemoryService | null;
@@ -214,7 +217,31 @@ export async function buildApp(deps: Deps) {
       try {
         return { state: await deps.machines.start(office.id) };
       } catch (err) {
+        if (err instanceof ClaudeTokenError) return reply.code(400).send({ error: err.message, code: "claude_token" });
         return reply.code(502).send({ error: `Couldn't start your office: ${(err as Error).message}` });
+      }
+    });
+
+    /** The office's Claude login: whether it's set, its last characters, and whether Claude still accepts it. */
+    authed.get("/office/claude", async (req, reply) => {
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.claude) return { set: false, last4: null, status: null, setAt: null, required: false };
+      return { ...(await deps.claude.status(office.id)), required: true };
+    });
+
+    /** Saves the CEO's token (from `claude setup-token`). Checked with Anthropic first; never sent back. */
+    authed.post<{ Body: { token?: string } }>("/office/claude", async (req, reply) => {
+      const office = await deps.offices.officeOf(req.user.id);
+      if (!office) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.claude) return reply.code(503).send({ error: "Claude tokens aren't set up on this server." });
+      try {
+        const status = await deps.claude.set(office.id, String(req.body?.token ?? ""));
+        await deps.audit?.(office.id, "ceo", "claude.token.set", status.last4 ?? "", {});
+        return status;
+      } catch (err) {
+        if (err instanceof ClaudeTokenError) return reply.code(400).send({ error: err.message });
+        throw err;
       }
     });
 
@@ -332,13 +359,24 @@ export async function buildApp(deps: Deps) {
       return deps.linear.status(id);
     });
 
-    authed.post<{ Body: { teamId?: string } }>("/office/linear/connect", async (req, reply) => {
+    authed.get<{ Querystring: { teamId?: string } }>("/office/linear/projects", async (req, reply) => {
+      const id = await officeOf(req);
+      if (!id) return reply.code(404).send({ error: "no office yet" });
+      if (!deps.linear || !req.query.teamId) return { projects: [] };
+      try {
+        return { projects: await deps.linear.client.projects(req.query.teamId) };
+      } catch (err) {
+        return linearError(reply, err);
+      }
+    });
+
+    authed.post<{ Body: { teamId?: string; projectId?: string | null } }>("/office/linear/connect", async (req, reply) => {
       const id = await officeOf(req);
       if (!id) return reply.code(404).send({ error: "no office yet" });
       if (!deps.linear) return reply.code(503).send({ error: "Linear isn't set up on this server yet." });
       if (!req.body?.teamId) return reply.code(400).send({ error: "teamId is required" });
       try {
-        return { link: await deps.linear.connect(id, req.body.teamId) };
+        return { link: await deps.linear.connect(id, req.body.teamId, req.body.projectId ?? null) };
       } catch (err) {
         return linearError(reply, err);
       }
