@@ -6,6 +6,7 @@ import { useSim } from "@/sim/store";
 import { Btn, Empty, Face, Section, Segmented, Window } from "../bits";
 import { useUI } from "../ui";
 import { nameOf } from "../who";
+import { Linked } from "../real/Linked";
 
 /** Booking a meeting: who, the agenda, and who chairs. Ada writes the pre-read. */
 export function MeetingPlanner({ from }: { from: string }) {
@@ -208,7 +209,9 @@ export function LiveMeeting({ id }: { id: string }) {
                   <div className="text-[11.5px]">
                     <span className="font-semibold text-ink">{nameOf(l.who)}</span> <span className="text-faint">{l.t}</span>
                   </div>
-                  <div className="whitespace-pre-wrap text-[12.5px] leading-snug text-ink-2">{l.text}</div>
+                  <div className="whitespace-pre-wrap text-[12.5px] leading-snug text-ink-2"><Linked text={l.text} who={l.who} /></div>
+                  {l.sending && <div className="text-[11px] text-faint">Sending…</div>}
+                  {l.failed && <div className="text-[11px] text-bad">Not sent: {l.failed}</div>}
                 </div>
               </div>
             ))}

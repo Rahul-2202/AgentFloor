@@ -9,6 +9,7 @@ import { Bar, Btn, Dot, Empty, Face, Section, Segmented, Window } from "../bits"
 import { useUI } from "../ui";
 import { nameOf, roleOf } from "../who";
 import { MemCard } from "./MemoryWindow";
+import { Linked } from "../real/Linked";
 
 type Tab = "spec" | "rules" | "board" | "channel" | "memory" | "members";
 const WHEN: Record<WhenBlocked, string> = { park: "park_and_switch", guess: "best_guess_and_flag", wait: "stop_and_wait" };
@@ -279,7 +280,7 @@ export function RoomWindow({ id, tab: initial }: { id: RoomKey; tab?: string }) 
                     <div className="text-[12px]">
                       <span className="font-semibold text-ink">{nameOf(m.who)}</span> <span className="text-faint">{m.t}</span>
                     </div>
-                    <div className="whitespace-pre-wrap text-[13px] text-ink-2">{m.text}</div>
+                    <div className="whitespace-pre-wrap text-[13px] text-ink-2"><Linked text={m.text} who={m.who} /></div>
                   </div>
                 </div>
               ))}

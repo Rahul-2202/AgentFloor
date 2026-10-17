@@ -6,6 +6,7 @@ import { useSim } from "@/sim/store";
 import type { Conversation } from "@/sim/types";
 import { Btn, Empty, Face, Segmented } from "../bits";
 import { nameOf } from "../who";
+import { Linked } from "../real/Linked";
 
 type Minutes = Awaited<ReturnType<typeof meetingMinutes>>["minutes"];
 
@@ -72,7 +73,9 @@ function Detail({ c, onBack }: { c: Conversation; onBack: () => void }) {
                 <div className="text-[12px]">
                   <span className="font-semibold text-ink">{nameOf(m.who)}</span> <span className="text-faint">{m.t}</span>
                 </div>
-                <div className="whitespace-pre-wrap text-[13px] leading-snug text-ink-2">{m.text}</div>
+                <div className="whitespace-pre-wrap text-[13px] leading-snug text-ink-2"><Linked text={m.text} who={m.who} /></div>
+                {m.sending && <div className="text-[11px] text-faint">Sending…</div>}
+                {m.failed && <div className="text-[11px] text-bad">Not sent: {m.failed}</div>}
               </div>
             </div>
           ))}

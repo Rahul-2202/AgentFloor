@@ -180,7 +180,7 @@ export class Ada {
   }
 
   /** Minutes from a meeting's transcript: summary, decisions, action items with owners. */
-  async minutes(officeId: string, meeting: Meeting, transcript: string): Promise<Minutes> {
+  async minutes(officeId: string, meeting: Meeting, transcript: string, openTasks: { title: string; owner: string }[] = []): Promise<Minutes> {
     let out: Minutes = { meetingId: meeting.id, summary: "", decisions: [], actionItems: [] };
     const record: AdaTool = {
       name: "record_minutes",
@@ -197,7 +197,17 @@ export class Ada {
     };
     await this.d.brain.run({
       system: PERSONA,
-      prompt: `Write the minutes of the meeting "${meeting.title}" (attendees: ${meeting.attendees.join(", ")}). Call record_minutes once: a short summary; each decision with its rationale and the room it concerns; each action item with an owner (an attendee's agent id). Only what was actually decided or agreed; deferrals are action items with an owner.\n\nTranscript:\n${transcript}`,
+      prompt: [
+        `Write the minutes of the meeting "${meeting.title}" for the CEO (attendees, by agent id: ${meeting.attendees.join(", ")}). Call record_minutes once.`,
+        "Write for the CEO, who wasn't following every message: plain words, short sentences, and no internal ids (no T-12, K-3, PT-4 or section numbers). Name things by what they are.",
+        "summary: 3 to 5 sentences: where things stand and what changed in this meeting. End with one line starting \"Needs you:\" listing what is waiting on the CEO (approvals, answers, decisions), or \"Needs you: nothing.\"",
+        "decisions: only what was newly decided in this meeting (not restated plans or status), merged so each appears once; at most 6. Each with a one-line rationale and the room it concerns (room id).",
+        "action_items: only new commitments made in this meeting that aren't already open tasks (listed below); at most one or two per owner; the owner is an attendee's agent id. Skip anything someone is already doing. None is fine.",
+        openTasks.length ? `Open tasks already in the office (don't repeat these):\n${openTasks.slice(0, 60).map((t) => `- ${t.owner}: ${t.title}`).join("\n")}` : "",
+        `Transcript:\n${transcript}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       tools: [record],
       maxTurns: 3,
     });

@@ -269,7 +269,9 @@ function toOutputs(t: TaskRow, room: string, audit: OfficeData["audit"]): Output
       viewed: false,
       taskId: t.id,
       summary: t.definition_of_done ? `For “${t.title}”. Done means: ${t.definition_of_done}` : `For “${t.title}”.`,
-      url: o.url,
+      // A link on the web, or a file the agent wrote in its folder (opened in Files).
+      url: o.url && /^https?:\/\//.test(o.url) ? o.url : undefined,
+      file: o.url && !/^https?:\/\//.test(o.url) ? o.url : undefined,
       pr: pr ? Number(pr) : undefined,
     };
   });
