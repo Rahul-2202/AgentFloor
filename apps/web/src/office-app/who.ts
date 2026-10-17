@@ -17,6 +17,8 @@ const DESK_LOOK: Record<string, Look> = {};
 for (const [id, m] of Object.entries(CAST)) if (SPOTS[`seat:${id}`]) DESK_LOOK[`seat:${id}`] = m.look;
 // Empty slots keep the demo's names and suggestions (as Ada's ideas for rooms to add).
 const ORIGINAL = Object.fromEntries(Object.values(ROOMS).map((r) => [r.id, { name: r.name, suggestion: r.suggestion }]));
+/** The demo's characters (for the sign-in page's story); the office itself only shows real agents. */
+export const DEMO_CAST: Record<string, CastMember> = { ...CAST };
 // The office starts with only you and Ada; real agents are added from the setup.
 for (const id of Object.keys(CAST)) if (id !== "you" && id !== "ada") delete CAST[id];
 // The extra desks (the demo's people's desks) seat agents 6 and 7 of a room.

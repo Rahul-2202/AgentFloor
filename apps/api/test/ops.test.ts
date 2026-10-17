@@ -67,3 +67,16 @@ test("errors group by their message, not their ids", () => {
   assert.equal(fingerprint("api", 'office 6f1c2a3b-1111-2222-3333-444455556666: task T-12 failed after 3 tries "x"'), fingerprint("api", 'office 0a0b0c0d-aaaa-bbbb-cccc-ddddeeeeffff: task T-9 failed after 5 tries "y"'));
   assert.notEqual(fingerprint("api", "boom"), fingerprint("web", "boom"));
 });
+
+test("the browser may PATCH and DELETE (memory edits, removing someone from the allowlist)", async () => {
+  const app = await buildApp({
+    verify: async () => users.boss!,
+    offices: { officeOf: async () => null, ensureOffice: async () => ({ office: { id: "o", name: "O", onboardedAt: null, sandboxState: "none", daemonConnected: false }, created: true }) },
+    hub: new OfficeHub(memoryLinkStore()),
+    webOrigins: ["https://web.example"],
+  });
+  for (const method of ["DELETE", "PATCH"]) {
+    const res = await app.inject({ method: "OPTIONS", url: "/admin/allowlist/2", headers: { origin: "https://web.example", "access-control-request-method": method, "access-control-request-headers": "authorization" } });
+    assert.match(String(res.headers["access-control-allow-methods"]), new RegExp(method));
+  }
+});

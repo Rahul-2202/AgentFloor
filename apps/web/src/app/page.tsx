@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { ensureOffice, type Office } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { OfficeApp } from "@/office-app/OfficeApp";
+import { SignIn } from "./SignIn";
 
 type State =
   | { kind: "loading" }
@@ -55,43 +56,11 @@ export default function Home() {
   if (state.kind === "office") return <OfficeApp key={state.office.id} office={state.office} />;
 
   return (
-    <main className="min-h-dvh grid place-items-center px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-surface p-8 shadow-[var(--shadow-card)]">
-        <h1 className="font-display text-2xl font-semibold">AgentFloor</h1>
-        <p className="mt-1 text-muted">Run a company of AI agents from a pixel office.</p>
-
-        {state.kind === "loading" && <p className="mt-8 text-faint">Loading…</p>}
-
-        {state.kind === "signed-out" && (
-          <>
-            <button
-              onClick={signIn}
-              className="mt-8 w-full rounded-xl bg-ink px-4 py-3 font-medium text-white transition hover:bg-ink-2"
-            >
-              Sign in with GitHub
-            </button>
-            {state.error && <p className="mt-3 text-sm text-bad">{state.error}</p>}
-          </>
-        )}
-
-        {state.kind === "not-allowed" && (
-          <div className="mt-8 space-y-3">
-            <p className="text-sm text-ink-2">{state.error}</p>
-            <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
-              Sign out
-            </button>
-          </div>
-        )}
-
-        {state.kind === "error" && (
-          <div className="mt-8 space-y-3">
-            <p className="text-sm text-bad">Couldn&apos;t open your office: {state.error}</p>
-            <button onClick={() => supabase.auth.signOut()} className="text-sm text-muted underline">
-              Sign out
-            </button>
-          </div>
-        )}
-      </div>
-    </main>
+    <SignIn
+      state={state.kind}
+      error={"error" in state ? state.error : undefined}
+      onSignIn={() => void signIn()}
+      onSignOut={() => void supabase.auth.signOut()}
+    />
   );
 }
