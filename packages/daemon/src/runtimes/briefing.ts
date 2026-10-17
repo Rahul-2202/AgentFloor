@@ -44,7 +44,8 @@ The code: your working folder is your own worktree of ${repo.fullName} (GitHub).
 - For each task, branch from the latest ${repo.defaultBranch}: git fetch origin && git checkout -b af/${agent.id}/<task-id> origin/${repo.defaultBranch}
 - Commit in small steps with clear messages. Run the project's tests before you open a PR.
 - open_pr(title, body, task_id) pushes your branch and opens the PR; it shows on your task. Never push to ${repo.defaultBranch}.
-- Nobody merges but the CEO. When a PR is ready, tell your head; heads ask the CEO with request_merge.`;
+- Nobody merges but the CEO. When a PR is ready, tell your head; heads ask the CEO with request_merge.
+- Git credentials come from the office automatically (git push and open_pr just work). Never ask anyone for a GitHub token or password. If a push fails, say what git printed to your head; don't work around it.`;
 }
 
 function officeRules(agent: AgentDef): string {

@@ -103,6 +103,24 @@ export class GitHubApp {
     return r.repositories.map((x) => ({ fullName: x.full_name, defaultBranch: x.default_branch, private: x.private }));
   }
 
+  /**
+   * An empty repo (no branches) gets its first commit, a README on the default
+   * branch, so agents have something to branch from. Repos with commits are
+   * never touched. True if it made the commit.
+   */
+  async startEmptyRepo(installationId: string, repo: string, branch: string): Promise<boolean> {
+    const t = await this.token(installationId, repo);
+    const branches = await this.call<unknown[]>("GET", `/repos/${repo}/branches?per_page=1`, t);
+    if (branches.length) return false;
+    const name = repo.split("/")[1] ?? repo;
+    await this.call("PUT", `/repos/${repo}/contents/README.md`, t, {
+      message: "Start the repo (AgentFloor)",
+      content: Buffer.from(`# ${name}\n`).toString("base64"),
+      branch,
+    });
+    return true;
+  }
+
   async openPr(installationId: string, repo: string, p: { head: string; base: string; title: string; body: string; draft?: boolean }): Promise<{ number: number; url: string }> {
     const t = await this.token(installationId, repo);
     try {
