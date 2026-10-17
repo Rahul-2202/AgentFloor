@@ -61,7 +61,9 @@ class CliRuntime implements AgentRuntime {
     mkdirSync(this.ctx.workdir, { recursive: true });
     // Its own repo, so CLIs treat each agent as a separate project (sessions, memory, trust)
     // rather than as part of whatever repo the office lives in.
-    if (!existsSync(join(this.ctx.workdir, ".git"))) {
+    // (Not in the office's repo: there the folder is a worktree the office makes; a repo of
+    // its own would have no remote or credentials, and the agent's commits would go nowhere.)
+    if (!this.ctx.inRepo && !existsSync(join(this.ctx.workdir, ".git"))) {
       spawnSync("git", ["init", "-q"], { cwd: this.ctx.workdir });
       writeFileSync(join(this.ctx.workdir, ".gitignore"), ".agentfloor/\n");
     }

@@ -84,6 +84,8 @@ export class GitHubService {
     const repo = (await this.app.repos(link.installationId)).find((r) => r.fullName === fullName);
     if (!repo) throw new GitHubUserError(`AgentFloor can't see ${fullName}. Add it to the app's installation on GitHub first.`);
     const next = { ...link, repo: repo.fullName, defaultBranch: repo.defaultBranch };
+    // A brand-new, empty repo: its first commit, so agents can branch from the default branch.
+    await this.app.startEmptyRepo(link.installationId, repo.fullName, repo.defaultBranch || "main");
     await this.store.save(officeId, next);
     return next;
   }
@@ -98,6 +100,7 @@ export class GitHubService {
   async handle(officeId: string, name: string, args: any): Promise<unknown> {
     const link = await this.need(officeId);
     if (!link.repo) throw new GitHubUserError("No repo is connected.");
+    if (name === "repo_init") return { created: await this.app.startEmptyRepo(link.installationId, link.repo, link.defaultBranch || "main") };
     if (name === "git_token") return { username: "x-access-token", password: await this.app.token(link.installationId, link.repo) };
     if (name === "open_pr") {
       return this.app.openPr(link.installationId, link.repo, { head: String(args.head), base: String(args.base ?? link.defaultBranch), title: String(args.title), body: String(args.body ?? ""), draft: !!args.draft });

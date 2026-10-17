@@ -71,6 +71,7 @@ async function fakeGitHub() {
     if (path === "/orgs/locked-org/memberships/ceo-login") return json(403, { message: "Resource not accessible by integration" });
     if (path === "/app/installations/99") return json(200, { account: { login: "someone-else", type: "User" } });
     if (path.endsWith("/access_tokens")) return json(201, { token: `ghs_${body?.repositories?.[0] ?? "meta"}`, expires_at: new Date(Date.now() + 3600_000).toISOString() });
+    if (path === "/repos/acme/web/branches") return json(200, [{ name: "main" }]); // not empty: left alone
     if (path === "/installation/repositories") return json(200, { repositories: [{ full_name: "acme/web", default_branch: "main", private: true }] });
     if (req.method === "POST" && path === "/repos/acme/web/pulls") return json(201, { number: 7, html_url: "https://github.com/acme/web/pull/7" });
     if (req.method === "PUT" && path === "/repos/acme/web/pulls/7/merge") return json(200, { sha: "abc1234def", merged: true });

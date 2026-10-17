@@ -99,6 +99,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningOffice> {
     dataDir: opts.dataDir,
     root: ROOT,
     env: { AGENTFLOOR_URL: url, AGENTFLOOR_TOKEN: auth.tokenFor(OFFICE), PATH: `${join(ROOT, "bin")}:${process.env.PATH ?? ""}` },
+    // An empty repo: AgentFloor (which holds the GitHub App) gives it its first commit.
+    startEmpty: async () => void (await office.hooks.api?.("repo_init", {})),
+    log,
   });
   office.hooks.push = (agent) => repo.push(agent);
   office.hooks.rootsOf = (agent) => {
