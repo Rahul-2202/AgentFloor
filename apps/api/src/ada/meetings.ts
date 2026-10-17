@@ -72,7 +72,8 @@ export class Meetings {
       const line = `${who(x.from)}: ${x.body}`;
       if (said.at(-1) !== line && !said.slice(-6).includes(line)) said.push(line);
     }
-    const minutes = await this.o.ada.minutes(officeId, m, said.join("\n\n"));
+    const open = (await this.o.data.tasks(officeId)).filter((t) => t.status !== "done").map((t) => ({ title: t.title, owner: t.owner }));
+    const minutes = await this.o.ada.minutes(officeId, m, said.join("\n\n"), open);
 
     // Each action item is a task for its owner (tracked through the task).
     for (const a of minutes.actionItems) {

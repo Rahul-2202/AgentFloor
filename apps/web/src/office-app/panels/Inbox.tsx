@@ -9,6 +9,7 @@ import { Btn, Empty, Face, Section } from "../bits";
 import { MergeBox } from "../real/MergeBox";
 import { useUI } from "../ui";
 import { nameOf } from "../who";
+import { Linked } from "../real/Linked";
 
 const KIND: Record<InboxItem["kind"], { l: string; c: string }> = {
   question: { l: "Question", c: "bg-[#fdecea] text-[#9b2c24]" },
@@ -53,7 +54,7 @@ function Item({ i }: { i: InboxItem }) {
           )}
           {i.body && (
             <div className={`mt-1 whitespace-pre-wrap text-[12px] text-muted ${more ? "" : "line-clamp-3"}`} onClick={() => setMore((v) => !v)}>
-              {i.body}
+              <Linked text={i.body} who={i.from} />
             </div>
           )}
         </div>

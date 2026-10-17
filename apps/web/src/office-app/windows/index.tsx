@@ -25,7 +25,7 @@ export function WindowRouter() {
   ) : w.kind === "terminal" ? (
     <TerminalWindow id={w.id!} />
   ) : w.kind === "files" ? (
-    <FilesWindow id={w.id!} />
+    <FilesWindow id={w.id!} path={w.tab} />
   ) : w.kind === "memory" ? (
     <MemoryWindow id={w.id!} />
   ) : w.kind === "config" ? (

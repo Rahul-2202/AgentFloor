@@ -331,7 +331,15 @@ export class Office {
       if (from !== CEO) throw new OfficeError("not_allowed", `You're not in thread ${t.id}.`);
       t.participants.push(CEO);
     }
-    if (t.state === "resolved") throw new OfficeError("thread_closed", `Thread ${t.id} is resolved. Start a new one with ask or inform.`);
+    if (t.state === "resolved") {
+      // The CEO can pick any conversation back up (a finished task, an answered question);
+      // agents start a new thread instead. A meeting that has ended stays closed.
+      if (from !== CEO) throw new OfficeError("thread_closed", `Thread ${t.id} is resolved. Start a new one with ask or inform.`);
+      if (t.kind === "meeting") throw new OfficeError("thread_closed", "That meeting has ended. Message the heads directly, or call another meeting.");
+      t.state = "open";
+      t.sent = 0;
+      t.awaiting = null;
+    }
 
     const huddle = t.kind === "huddle";
     const meeting = t.kind === "meeting";

@@ -111,6 +111,8 @@ export interface Output {
   meta?: [string, string][];
   /** Where it lives (a PR or file link), and the PR number for pull requests. */
   url?: string;
+  /** A file in the agent's working folder (not on the web). */
+  file?: string;
   pr?: number;
 }
 
@@ -134,6 +136,9 @@ export interface Msg {
   who: string;
   text: string;
   t: string;
+  /** Yours, on its way to the office (or not sent, with why). */
+  sending?: boolean;
+  failed?: string;
 }
 
 export interface Conversation {

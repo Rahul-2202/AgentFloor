@@ -9,6 +9,7 @@ import { ADA_SUGGESTIONS } from "../cards/AdaCard";
 import { Btn, Face, Segmented, StateChip, Window } from "../bits";
 import { useUI } from "../ui";
 import { nameOf } from "../who";
+import { Linked } from "../real/Linked";
 
 const AGENT_CHIPS = ["What are you working on?", "Anything blocking you?", "What's next after this?"];
 
@@ -82,7 +83,7 @@ function Bubble({ m, agent }: { m: ChatMsg; agent: string }) {
     <div className={`flex items-end gap-2 ${mine ? "justify-end" : ""}`}>
       {!mine && <Face id={agent} size={26} />}
       <div className={`flex max-w-[82%] flex-col ${mine ? "items-end" : "items-start"}`}>
-        {m.text && <div className={`whitespace-pre-wrap rounded-[18px] px-3.5 py-2.5 text-[13.5px] leading-[1.45] ${mine ? "rounded-br-[6px] bg-ink text-white" : "rounded-bl-[6px] bg-[#f2f0ec] text-ink"}`}>{m.text}</div>}
+        {m.text && <div className={`whitespace-pre-wrap rounded-[18px] px-3.5 py-2.5 text-[13.5px] leading-[1.45] ${mine ? "rounded-br-[6px] bg-ink text-white" : "rounded-bl-[6px] bg-[#f2f0ec] text-ink"}`}>{mine ? m.text : <Linked text={m.text} who={agent} />}</div>}
         {m.card && <CardView card={m.card} />}
         <span className="mt-1 text-[10.5px] text-faint">{m.t}</span>
       </div>

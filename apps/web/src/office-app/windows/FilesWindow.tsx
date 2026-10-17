@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { officeCall } from "@/lib/api";
 import { useSim } from "@/sim/store";
 import { Btn, Empty, Face, Window } from "../bits";
@@ -24,7 +24,7 @@ const ago = (ms: number) => {
 const kb = (n: number) => (n < 1024 ? `${n} B` : `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`);
 
 /** What an agent has written in its working folder (read-only). */
-export function FilesWindow({ id }: { id: string }) {
+export function FilesWindow({ id, path }: { id: string; path?: string }) {
   const { s } = useSim();
   const ui = useUI();
   const agents = s.setup?.agents ?? [];
@@ -47,10 +47,24 @@ export function FilesWindow({ id }: { id: string }) {
     load();
   }, [load]);
 
-  const read = (path: string) => {
-    setErr("");
-    officeCall<FileView>("agent_file", { agent, path }).then(setOpen, (e) => setErr((e as Error).message));
-  };
+  const read = useCallback(
+    (p: string) => {
+      setErr("");
+      // Agents name files relative to their folder, sometimes with its "work/" in front.
+      const alt = p.replace(/^\.?\/?(work\/)?/, "");
+      officeCall<FileView>("agent_file", { agent, path: p }).then(setOpen, (e) =>
+        alt !== p ? officeCall<FileView>("agent_file", { agent, path: alt }).then(setOpen, () => setErr((e as Error).message)) : setErr((e as Error).message),
+      );
+    },
+    [agent],
+  );
+  // Opened on a file (from an output or a message): show it straight away.
+  const opened = useRef(false);
+  useEffect(() => {
+    if (!path || opened.current || agent !== id) return;
+    opened.current = true;
+    read(path);
+  }, [path, agent, id, read]);
 
   const asleep = s.machine !== "started";
 

@@ -34,7 +34,19 @@ export function StatusTag({ o }: { o: Output }) {
 }
 
 function Preview({ o }: { o: Output }) {
+  const ui = useUI();
   if (o.pr) return <MergeBox pr={o.pr} />;
+  if (o.file)
+    return (
+      <button onClick={() => ui.openWin({ kind: "files", id: o.by, tab: o.file })} className="flex w-full items-center gap-3 rounded-[14px] bg-white p-3.5 text-left ring-1 ring-black/[0.08] hover:ring-black/20">
+        <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-[#f2f0ec] text-ink-2">▤</span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-mono text-[13px] font-semibold text-ink">{o.file}</div>
+          <div className="text-[12px] text-muted">In {nameOf(o.by)}&apos;s folder on the office computer</div>
+        </div>
+        <span className="text-[12px] font-semibold text-ink">Open →</span>
+      </button>
+    );
   if (o.url)
     return (
       <a href={o.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-[14px] bg-white p-3.5 ring-1 ring-black/[0.08] hover:ring-black/20">

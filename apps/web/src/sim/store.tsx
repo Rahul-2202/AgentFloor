@@ -109,6 +109,8 @@ interface Overlay {
   pending: Pending | null;
   /** Ada's chat (seeded from the database) and messages to agents still on their way. */
   chats: Record<string, ChatMsg[]>;
+  /** What you said in threads, shown until the office has it. */
+  echoes: Record<string, { id: string; text: string; at: number; failed?: string }[]>;
   adaBusy: boolean;
   adaReady: boolean;
 }
@@ -116,9 +118,11 @@ type Local =
   | Action
   | { type: "clearPatches"; kind: PatchKind }
   | { type: "adaSeed"; msgs: ChatMsg[] }
-  | { type: "adaBusy"; on: boolean };
+  | { type: "adaBusy"; on: boolean }
+  | { type: "echo"; thread: string; echo: { id: string; text: string; at: number } }
+  | { type: "echoFailed"; thread: string; id: string; why: string };
 
-const EMPTY_OVERLAY: Overlay = { live: {}, patches: { task: {}, output: {}, event: {}, inbox: {}, memory: {} }, toasts: [], pending: null, chats: {}, adaBusy: false, adaReady: false };
+const EMPTY_OVERLAY: Overlay = { live: {}, patches: { task: {}, output: {}, event: {}, inbox: {}, memory: {} }, toasts: [], pending: null, chats: {}, echoes: {}, adaBusy: false, adaReady: false };
 
 function overlay(o: Overlay, a: Local): Overlay {
   switch (a.type) {
@@ -148,6 +152,10 @@ function overlay(o: Overlay, a: Local): Overlay {
       return { ...o, adaReady: true, chats: { ...o.chats, ada: [...a.msgs, ...(o.chats.ada ?? [])] } };
     case "adaBusy":
       return { ...o, adaBusy: a.on };
+    case "echo":
+      return { ...o, echoes: { ...o.echoes, [a.thread]: [...(o.echoes[a.thread] ?? []), a.echo] } };
+    case "echoFailed":
+      return { ...o, echoes: { ...o.echoes, [a.thread]: (o.echoes[a.thread] ?? []).map((e) => (e.id === a.id ? { ...e, failed: a.why } : e)) } };
     case "propose":
       return { ...o, pending: a.pending };
     case "cancelPending":
@@ -371,7 +379,14 @@ export function SimProvider({ office, fixture, children }: { office: Office; fix
       tasks: patched(b.tasks, o.patches.task),
       outputs: patched(b.outputs.map((x) => (viewed.has(x.id) ? { ...x, viewed: true } : x)), o.patches.output),
       calendar: patched(b.calendar, o.patches.event),
-      conversations: b.conversations,
+      // Your messages show at once; each gives way to the office's copy when it arrives.
+      conversations: b.conversations.map((c) => {
+        const mine = o.echoes[c.id];
+        if (!mine?.length) return c;
+        const real = c.messages.filter((m) => m.who === "you").map((m) => m.text);
+        const waiting = mine.filter((e) => !real.includes(e.text));
+        return waiting.length ? { ...c, messages: [...c.messages, ...waiting.map((e) => ({ who: "you", text: e.text, t: time(new Date(e.at).toISOString()), sending: !e.failed, failed: e.failed }))] } : c;
+      }),
       memory: patched(b.memory, o.patches.memory),
       inbox: patched(b.inbox, o.patches.inbox),
       versions: b.versions,
@@ -437,7 +452,18 @@ export function SimProvider({ office, fixture, children }: { office: Office; fix
         local({ type: "chat", agent: to, msg: { id: `local-${Date.now()}`, from: "you", text, t: time(new Date().toISOString()) } });
         return quiet(attempt(officeCall("ceo_message", { to, text, urgency })));
       },
-      reply: (threadId, text, resolves) => quiet(attempt(officeCall("ceo_reply", { thread_id: threadId, text, resolves: resolves || undefined }))),
+      reply: async (threadId, text, resolves) => {
+        const id = `echo-${Date.now()}`;
+        local({ type: "echo", thread: threadId, echo: { id, text, at: Date.now() } });
+        try {
+          await officeCall("ceo_reply", { thread_id: threadId, text, resolves: resolves || undefined });
+          return true;
+        } catch (e) {
+          local({ type: "echoFailed", thread: threadId, id, why: errText(e) });
+          toast(errText(e));
+          return false;
+        }
+      },
       resolve: (id) => {
         local({ type: "inbox", id, patch: { resolved: true } });
         return quiet(attempt(resolveInbox(id)));

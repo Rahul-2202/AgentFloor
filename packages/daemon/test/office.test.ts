@@ -44,6 +44,16 @@ test("ask and reply: the answer reaches the asker and resolves the thread", () =
   assert.equal(office.thread(threadId).awaiting, null);
 });
 
+test("the CEO can pick a resolved thread back up; agents can't", () => {
+  const { office } = makeOffice();
+  const { threadId } = office.ask("backend", { to: "frontend", question: "Local time or UTC?" });
+  office.reply("frontend", { threadId, text: "UTC.", resolves: true });
+  assert.throws(() => office.reply("backend", { threadId, text: "One more thing" }), /resolved/);
+  office.reply(CEO, { threadId, text: "Use the clinic's time zone in the UI." });
+  assert.equal(office.thread(threadId).state, "open");
+  assert.ok(office.take("backend", "tool").some((m) => m.from === CEO), "the agents get the CEO's message");
+});
+
 test("delivery points: questions mid-task, work at turn end, stop right away", () => {
   const { office } = makeOffice();
   office.requestWork("pm", { to: "backend", title: "Build slots API" });
