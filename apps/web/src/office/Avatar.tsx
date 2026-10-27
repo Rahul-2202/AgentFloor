@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, animate, motion, useMotionValue, useTransform, type AnimationPlaybackControls } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybackControls } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { BrandIcon } from "@/components/brands";
 import { portrait } from "./three/portrait";
@@ -8,13 +8,15 @@ import type { Look } from "./look";
 import { findPath } from "./path";
 import { spot, TILE, type CastMember } from "./layout";
 import { useBody } from "./three/bodies";
-import { lift } from "./three/view";
+import { RISE } from "./camera";
+import { usePin } from "./floor";
+import { seatFacing } from "./three/Person";
 import type { AgentScene, AgentStatus, Bubble, Pt } from "./types";
 
 const WALK_SPEED = 3.4; // tiles per second
 
-/** The 3D figure's size on screen, in plan pixels: overlays sit just above its head. */
-export const FIGURE = { w: 18, h: Math.round(lift(2.3) * TILE) };
+/** How tall the 3D figures stand (units): tags sit just above. */
+export const FIG_H = 2.8;
 
 /** Head-and-shoulders picture of the 3D figure, used in tags, cards and lists. */
 export function Portrait({ look, size = 32, className, bg, chief = false, round = false }: { look: Look; size?: number; className?: string; bg?: string; chief?: boolean; round?: boolean }) {
@@ -135,7 +137,6 @@ export function Avatar({
   const x = useMotionValue(start[0] * TILE);
   const y = useMotionValue(start[1] * TILE);
   const lifted = Boolean(scene.bubble || scene.emote);
-  const z = useTransform(y, (v) => Math.round(v) + 2 + (lifted ? 2000 : 0));
   const [walking, setWalking] = useState(false);
   const ctl = useRef<AnimationPlaybackControls[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,36 +191,54 @@ export function Avatar({
 
   useEffect(() => () => ctl.current.forEach((c) => c.stop()), []);
 
-  const s = FIGURE;
+  const feet = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLDivElement>(null);
+  const where = (): Pt => [x.get() / TILE, y.get() / TILE];
+  usePin(feet, where, 0, 0);
+  // Seated people's heads are lower: keep their tags just above them.
+  const seated = !walking && seatFacing(typeof scene.at === "string" ? scene.at : undefined) !== null;
+  usePin(head, where, seated ? FIG_H - 0.6 : FIG_H, lifted ? 2000 : 1);
   useBody({ id: member.id, look: member.look, x, y, walking, status: scene.status, at: typeof scene.at === "string" ? scene.at : undefined, highlight: handlers?.highlight });
   const bubble: Bubble | null = scene.bubble ? (typeof scene.bubble === "string" ? { text: scene.bubble } : scene.bubble) : null;
   const status = scene.status;
 
   return (
-    <motion.div
-      className="absolute left-0 top-0"
-      data-agent={member.id}
-      style={{ x, y, zIndex: z }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.35 } }}
-      transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
-    >
-      <div style={{ position: "absolute", left: -s.w / 2, top: -s.h, width: s.w, height: s.h }}>
-        {handlers && (
-          <div
-            className="absolute -inset-x-1 -bottom-1 -top-1 z-10 cursor-pointer"
-            onPointerEnter={handlers.onEnter}
-            onPointerLeave={handlers.onLeave}
-            onClick={(e) => {
-              e.stopPropagation();
-              handlers.onClick?.();
-            }}
-          />
-        )}
+    <>
+      <motion.div
+        ref={feet}
+        className="absolute left-0 top-0"
+        data-agent={member.id}
+        style={{ width: 0, height: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, transition: { duration: 0.35 } }}
+        transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
+      >
+        {/* the figure's outline on screen, for hovering and clicking */}
+        <div
+          className={`absolute ${handlers ? "cursor-pointer" : "pointer-events-none"}`}
+          style={{ left: "calc(var(--u) * -0.5)", width: "calc(var(--u) * 1)", bottom: "calc(var(--u) * -0.15)", height: `calc(var(--u) * ${(FIG_H * RISE).toFixed(2)})` }}
+          onPointerEnter={handlers?.onEnter}
+          onPointerLeave={handlers?.onLeave}
+          onClick={(e) => {
+            if (!handlers) return;
+            e.stopPropagation();
+            handlers.onClick?.();
+          }}
+        />
+      </motion.div>
+      <motion.div
+        ref={head}
+        className="pointer-events-none absolute left-0 top-0"
+        style={{ width: 0, height: 0 }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0, transition: { duration: 0.35 } }}
+        transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
+      >
         {/* Above the head */}
-        <div className="pointer-events-none absolute left-1/2 bottom-full" style={{ width: 0, height: 0 }}>
-          <div className="counter absolute bottom-[3px] left-0 flex -translate-x-1/2 flex-col items-center gap-1" style={{ ["--origin" as string]: "50% 100%" }}>
+        <div style={{ width: 0, height: 0 }}>
+          <div className="absolute bottom-[4px] left-0 flex -translate-x-1/2 flex-col items-center gap-1">
             <AnimatePresence mode="popLayout">
               {bubble && (
                 <motion.div
@@ -275,16 +294,14 @@ export function Avatar({
                 className="absolute"
                 style={{ left: 5, bottom: -9 }}
               >
-                <div className="counter" style={{ ["--origin" as string]: "0% 100%" }}>
-                  <div className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-bad px-1 text-[10px] font-bold text-white ring-2 ring-white">
-                    {scene.badge}
-                  </div>
+                <div className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-bad px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                  {scene.badge}
                 </div>
               </motion.div>
             ) : null}
           </AnimatePresence>
         </div>
-      </div>
-    </motion.div>
+      </motion.div>
+    </>
   );
 }
