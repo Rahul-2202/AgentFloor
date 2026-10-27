@@ -23,9 +23,9 @@ function open() {
   const key = new DirectionalLight("#fff3e2", 1.6);
   key.position.set(-2, 4, 5);
   scene.add(key);
-  const camera = new OrthographicCamera(-0.68, 0.68, 0.68, -0.68, 0.1, 20);
-  camera.position.set(0, 2.2, 5);
-  camera.lookAt(0, 1.66, 0);
+  const camera = new OrthographicCamera(-0.58, 0.58, 0.58, -0.58, 0.1, 20);
+  camera.position.set(0, 2.6, 5);
+  camera.lookAt(0, 2.12, 0);
   studio = { renderer, scene, camera };
   return studio;
 }

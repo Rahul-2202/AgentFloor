@@ -2,7 +2,9 @@
 
 import { AnimatePresence, animate, motion, useMotionValue, useMotionValueEvent, useTransform } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FIGURE } from "@/office/Avatar";
+import { FIG_H, Portrait } from "@/office/Avatar";
+import { FLOOR_DEPTH } from "@/office/camera";
+import { OnFloor } from "@/office/floor";
 import { CAST, ROOMS, SPOTS, TILE, WORLD, spot } from "@/office/layout";
 import { Office } from "@/office/Office";
 import { useBody } from "@/office/three/bodies";
@@ -26,27 +28,22 @@ export function homeOf(id: string, s: Pick<SimState, "layout">) {
 function Player({ x, y, walking, who, bubble }: { x: ReturnType<typeof usePlayer>["x"]; y: ReturnType<typeof usePlayer>["y"]; walking: boolean; who: string; bubble?: string | null }) {
   const look = (CAST[who] ?? CAST.you).look;
   useBody({ id: `player:${who}`, look, x, y, walking });
-  const sp = FIGURE;
-  const z = useTransform(y, (v) => Math.round(v) + 3);
   return (
-    <motion.div className="pointer-events-none absolute left-0 top-0" style={{ x, y, zIndex: z }}>
-      <div style={{ position: "absolute", left: -sp.w / 2, top: -sp.h, width: sp.w, height: sp.h }}>
-        <div className="absolute bottom-full left-1/2" style={{ width: 0 }}>
-          <div className="counter absolute bottom-[3px] left-0 flex -translate-x-1/2 flex-col items-center gap-1 whitespace-nowrap" style={{ ["--origin" as string]: "50% 100%" }}>
-            <AnimatePresence>
-              {bubble && (
-                <motion.div key={bubble} initial={{ opacity: 0, y: 6, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="rounded-[12px] bg-white px-2.5 py-1 text-[11px] font-semibold text-ink shadow-md ring-1 ring-black/10">
-                  {bubble}
-                </motion.div>
-              )}
-            </AnimatePresence>
-            <div data-tour="player" className="rounded-full bg-ink px-2 py-[2px] text-[10.5px] font-bold text-white shadow-md">
-              You{who !== "you" ? <span className="font-semibold text-white/60"> · {CAST[who]?.name}</span> : null}
-            </div>
-          </div>
+    <OnFloor at={() => [x.get() / TILE, y.get() / TILE]} h={FIG_H} z={3} className="pointer-events-none">
+      <div className="absolute bottom-[4px] left-0 flex -translate-x-1/2 flex-col items-center gap-1 whitespace-nowrap">
+        <AnimatePresence>
+          {bubble && (
+            <motion.div key={bubble} initial={{ opacity: 0, y: 6, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="rounded-[12px] bg-white px-2.5 py-1 text-[11px] font-semibold text-ink shadow-md ring-1 ring-black/10">
+              {bubble}
+            </motion.div>
+          )}
+        </AnimatePresence>
+        <div data-tour="player" className="flex items-center gap-1 rounded-full bg-ink py-[2px] pl-[2px] pr-2 text-[10.5px] font-bold text-white shadow-md">
+          <Portrait look={look} size={16} round bg="rgba(255,255,255,0.9)" />
+          You{who !== "you" ? <span className="font-semibold text-white/60"> · {CAST[who]?.name}</span> : null}
         </div>
       </div>
-    </motion.div>
+    </OnFloor>
   );
 }
 
@@ -98,12 +95,16 @@ function Anchor({ at, children, z = 3000, offset = 24 }: { at: Pt; children: Rea
     return () => clearInterval(t);
   }, []);
 
-  const x = at[0] * TILE;
   return (
     <>
-      <div ref={head} className="pointer-events-none absolute" style={{ left: x, top: at[1] * TILE - offset, width: 0, height: 0 }} />
-      <div ref={feet} className="pointer-events-none absolute" style={{ left: x, top: at[1] * TILE + 6, width: 0, height: 0 }} />
-      <div className="absolute" style={{ left: x, top: place.below ? at[1] * TILE + 6 : at[1] * TILE - offset, zIndex: z, width: 0, height: 0 }}>
+      <OnFloor at={at} h={FIG_H} className="pointer-events-none">
+        <div ref={head} className="absolute" style={{ left: 0, top: -offset + 18, width: 0, height: 0 }} />
+      </OnFloor>
+      <OnFloor at={at} className="pointer-events-none">
+        <div ref={feet} className="absolute" style={{ left: 0, top: 6, width: 0, height: 0 }} />
+      </OnFloor>
+      <OnFloor at={at} h={place.below ? 0 : FIG_H} z={z}>
+      <div className="absolute" style={{ left: 0, top: place.below ? 6 : -offset + 18, width: 0, height: 0 }}>
         <div
           ref={box}
           className={`counter absolute left-0 ${place.below ? "top-0" : "bottom-0"}`}
@@ -118,6 +119,7 @@ function Anchor({ at, children, z = 3000, offset = 24 }: { at: Pt; children: Rea
           {children}
         </div>
       </div>
+      </OnFloor>
     </>
   );
 }
@@ -191,7 +193,7 @@ export function World() {
       e.preventDefault();
       const w = wheel.current;
       if (e.ctrlKey || e.metaKey) w.zoomBy(Math.exp(-e.deltaY * 0.01));
-      else w.panTo(panX.get() + e.deltaX / w.zoom, panY.get() + e.deltaY / w.zoom);
+      else w.panTo(panX.get() + e.deltaX / w.zoom, panY.get() + e.deltaY / (w.zoom * FLOOR_DEPTH));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -398,7 +400,7 @@ export function World() {
         }
         if (dragged.current) {
           // Screen pixels → world pixels.
-          panTo(st.px - dx / zoom, st.py - dy / zoom);
+          panTo(st.px - dx / zoom, st.py - dy / (zoom * FLOOR_DEPTH));
         }
       }}
       onPointerUp={() => {
@@ -432,9 +434,9 @@ export function World() {
         <Player x={player.x} y={player.y} walking={player.walking} who={meId} bubble={null} />
 
         {player.target && (
-          <div className="pointer-events-none absolute" style={{ left: player.target[0] * TILE, top: player.target[1] * TILE, zIndex: 5 }}>
-            <span className="absolute -left-[6px] -top-[3px] h-[6px] w-[12px] rounded-[50%] ring-1 ring-accent" style={{ animation: "pulse-ring 1.2s ease-out infinite" }} />
-          </div>
+          <OnFloor at={player.target} z={5} className="pointer-events-none">
+            <span className="absolute -left-[10px] -top-[5px] h-[10px] w-[20px] rounded-[50%] ring-2 ring-accent" style={{ animation: "pulse-ring 1.2s ease-out infinite" }} />
+          </OnFloor>
         )}
 
         <AnimatePresence>
@@ -526,7 +528,7 @@ const clampZoom = (z: number, fit: number) => Math.max(fit, Math.min(ZOOM_MAX, z
 
 /** The zoom that shows the whole office in the window (the most zoomed-out view). */
 function useFitZoom() {
-  const calc = () => Math.min(window.innerWidth / (WORLD.w * TILE), (window.innerHeight - 64) / (WORLD.h * TILE));
+  const calc = () => Math.min(window.innerWidth / (WORLD.w * TILE), (window.innerHeight - 64) / ((WORLD.h * FLOOR_DEPTH + 2.6) * TILE));
   const [fit, setFit] = useState(calc);
   useEffect(() => {
     const on = () => setFit(calc());

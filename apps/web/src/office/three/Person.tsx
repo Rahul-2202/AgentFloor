@@ -5,11 +5,10 @@ import { useEffect, useMemo, useRef } from "react";
 import { Mesh } from "three";
 import { TILE } from "../layout";
 import type { Bodies } from "./bodies";
-import { buildFigure, HIP } from "./figure";
+import { buildFigure, HIP, SEAT_HIP } from "./figure";
 import { clay } from "./materials";
 import { torus } from "./shapes";
 
-const SEAT_HIP = 0.62;
 
 /** Which way a seat faces (radians about y; 0 = toward the viewer), or null when it isn't a seat. */
 export function seatFacing(at: string | undefined): number | null {
@@ -19,6 +18,8 @@ export function seatFacing(at: string | undefined): number | null {
   if (/^mt:b\d/.test(at)) return Math.PI;
   if (at === "mt:head") return -Math.PI / 2;
   if (at === "mt:foot") return Math.PI / 2;
+  if (at.startsWith("lounge:") || at.startsWith("booth:")) return 0;
+  if (at.startsWith("cafe:")) return Math.PI;
   return null;
 }
 
@@ -81,28 +82,30 @@ export function Person({ id, store }: { id: string; store: Bodies }) {
     rig.body.rotation.y = s.face;
 
     // Walk cycle.
-    if (moving) s.phase += Math.max(dist, dt * 2.2) * 5.2;
+    if (moving) s.phase += Math.max(dist, dt * 2.2) * 4.2;
     const w = s.moving * (1 - s.sit);
     const sw = Math.sin(s.phase);
     const sit = s.sit;
     rig.hips.position.y = HIP + (SEAT_HIP - HIP) * sit + Math.abs(Math.cos(s.phase)) * 0.045 * w + Math.sin(t * 2.1) * 0.006 * (1 - w);
     // Seated: slide back onto the chair so the knees go under the desk.
-    rig.hips.position.z = -0.3 * sit;
-    rig.thighL.rotation.x = sw * 0.55 * w - (Math.PI / 2) * sit;
-    rig.thighR.rotation.x = -sw * 0.55 * w - (Math.PI / 2) * sit;
+    rig.hips.position.z = -0.32 * sit;
+    rig.thighL.rotation.x = sw * 0.5 * w - (Math.PI / 2) * sit;
+    rig.thighR.rotation.x = -sw * 0.5 * w - (Math.PI / 2) * sit;
     rig.shinL.rotation.x = Math.max(0, -sw) * 0.7 * w + (Math.PI / 2) * sit;
     rig.shinR.rotation.x = Math.max(0, sw) * 0.7 * w + (Math.PI / 2) * sit;
 
     // Arms: swing when walking, type when working at a desk, rest otherwise.
     const typing = sit > 0.5 && body.status === "working" && body.at?.startsWith("seat:") ? 1 : 0;
-    rig.armL.rotation.x = -sw * 0.45 * w - typing * (1.15 + Math.sin(t * 15) * 0.07) - sit * 0.35 * (1 - typing);
-    rig.armR.rotation.x = sw * 0.45 * w - typing * (1.15 + Math.sin(t * 15 + 1.7) * 0.07) - sit * 0.35 * (1 - typing);
-    rig.torso.rotation.x = 0.06 * w + typing * 0.08;
+    rig.armL.rotation.x = -sw * 0.42 * w - typing * 0.45 - sit * 0.3 * (1 - typing);
+    rig.armR.rotation.x = sw * 0.42 * w - typing * 0.45 - sit * 0.3 * (1 - typing);
+    rig.foreL.rotation.x = -0.22 * w - typing * (1.05 + Math.sin(t * 15) * 0.08) - sit * 0.75 * (1 - typing);
+    rig.foreR.rotation.x = -0.22 * w - typing * (1.05 + Math.sin(t * 15 + 1.7) * 0.08) - sit * 0.75 * (1 - typing);
+    rig.torso.rotation.x = 0.05 * w + typing * 0.06;
     rig.torso.scale.y = 1 + Math.sin(t * 2.1) * 0.012 * (1 - w);
-    // Heads tip up toward the viewer, as in the renders, so faces read from above.
+    // Heads tip a little toward the viewer, as in the renders.
     const thinking = body.status === "thinking" ? 1 : 0;
     rig.head.rotation.z = Math.sin(t * 1.3) * 0.12 * thinking;
-    rig.head.rotation.x = -0.34 + 0.12 * typing + Math.sin(t * 0.9 + id.length) * 0.03;
+    rig.head.rotation.x = -0.1 + 0.1 * typing + Math.sin(t * 0.9 + id.length) * 0.03;
     ring.visible = !!body.highlight;
   });
 

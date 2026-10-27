@@ -1,60 +1,77 @@
 "use client";
 
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import type { MotionValue } from "motion/react";
-import { useLayoutEffect, useMemo } from "react";
-import { DirectionalLight, NeutralToneMapping, Object3D, VSMShadowMap } from "three";
+import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
+import { Suspense, useEffect, useLayoutEffect, useMemo } from "react";
+import { ACESFilmicToneMapping, DirectionalLight, HalfFloatType, Object3D, PCFSoftShadowMap, PMREMGenerator, type PerspectiveCamera, WebGLRenderTarget } from "three";
+import { HDRLoader } from "three/examples/jsm/loaders/HDRLoader.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { eye, FOV, type Cam } from "../camera";
 import { FURNITURE, inLayout, WORLD } from "../layout";
 import type { Board, RoomId, RoomState } from "../types";
+import { ASSETS } from "./assets";
 import { useBodyList, type Bodies } from "./bodies";
 import { Building } from "./Building";
 import { Piece } from "./Furniture3D";
 import { Person } from "./Person";
-import { viewMatrix } from "./view";
 
-export interface StageView {
-  s: MotionValue<number>;
-  x: MotionValue<number>;
-  y: MotionValue<number>;
-}
-
-/** Locks the 3D camera to the 2D world's pan and zoom, every frame. */
-function Camera({ view }: { view: StageView }) {
-  const camera = useThree((s) => s.camera);
-  useLayoutEffect(() => {
-    camera.matrixAutoUpdate = false;
-    camera.matrixWorldAutoUpdate = false;
-    camera.position.set(0, 0, 0);
-    camera.rotation.set(0, 0, 0);
-    camera.matrixWorld.identity();
-    camera.matrixWorldInverse.identity();
-  }, [camera]);
-  useFrame((st) => {
-    viewMatrix(camera.projectionMatrix, { s: view.s.get(), x: view.x.get(), y: view.y.get() }, st.size.width, st.size.height);
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-  }, -1);
+/** Keeps the 3D camera on the office camera (the same one the 2D layer uses). */
+function CameraRig({ getCam }: { getCam: () => Cam | null }) {
+  const camera = useThree((s) => s.camera) as PerspectiveCamera;
+  useFrame(() => {
+    const c = getCam();
+    if (!c) return;
+    const [x, y, z] = eye(c);
+    camera.fov = (FOV * 180) / Math.PI;
+    camera.aspect = c.w / c.h;
+    camera.near = Math.max(1, y * 0.4);
+    camera.far = y * 4 + 200;
+    camera.position.set(x, y, z);
+    camera.lookAt(c.x, 0, c.z);
+    camera.updateProjectionMatrix();
+  }, -2);
   return null;
 }
 
-function Lights() {
+/** Daylight from the lighting map (a bright studio hall), for soft, even fill. */
+function Daylight() {
+  const hdr = useLoader(HDRLoader, `${ASSETS}/env/photo_studio_london_hall_1k.hdr`);
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const pm = new PMREMGenerator(gl);
+    const env = pm.fromEquirectangular(hdr).texture;
+    scene.environment = env;
+    scene.environmentIntensity = 0.85;
+    return () => {
+      scene.environment = null;
+      env.dispose();
+      pm.dispose();
+    };
+  }, [hdr, gl, scene]);
+  return null;
+}
+
+function Sun() {
   const sun = useMemo(() => {
-    // High and from the front left: short, soft shadows that fall behind things, as in the renders.
-    const l = new DirectionalLight("#fff3e2", 2.1);
-    l.position.set(WORLD.w / 2 - 12, 40, WORLD.h / 2 + 9);
+    // From the windows at the back left, high: soft shadows falling forward and right, as in the renders.
+    const l = new DirectionalLight("#fff1dc", 1.9);
+    l.position.set(WORLD.w / 2 - 14, 42, WORLD.h / 2 - 16);
     l.castShadow = true;
-    l.shadow.mapSize.set(2048, 2048);
+    l.shadow.mapSize.set(4096, 2048);
     const c = l.shadow.camera;
-    c.left = -34;
-    c.right = 34;
-    c.top = 30;
-    c.bottom = -30;
+    c.left = -WORLD.w / 2 - 6;
+    c.right = WORLD.w / 2 + 6;
+    c.top = WORLD.h / 2 + 10;
+    c.bottom = -WORLD.h / 2 - 10;
     c.near = 1;
-    c.far = 90;
-    l.shadow.bias = -0.0004;
-    l.shadow.normalBias = 0.02;
-    l.shadow.radius = 9;
-    l.shadow.blurSamples = 16;
-    l.shadow.intensity = 0.55;
+    c.far = 120;
+    l.shadow.bias = -0.0003;
+    l.shadow.normalBias = 0.025;
+    l.shadow.radius = 4;
+    l.shadow.intensity = 0.8;
     return l;
   }, []);
   const target = useMemo(() => {
@@ -67,14 +84,37 @@ function Lights() {
   }, [sun, target]);
   return (
     <>
-      <hemisphereLight args={["#fffaf2", "#d9c3a5", 1.55]} />
-      <ambientLight intensity={0.25} color="#ffffff" />
       <primitive object={sun} />
       <primitive object={target} />
-      {/* a soft fill from the viewer's side, so walls and faces aren't grey */}
-      <directionalLight color="#fff8f0" intensity={0.85} position={[WORLD.w / 2 + 6, 14, WORLD.h + 30]} />
+      <hemisphereLight args={["#fffaf2", "#d8c3a6", 0.35]} />
     </>
   );
+}
+
+/**
+ * Ambient occlusion over the render: the soft darkening where things meet the
+ * floor and each other that makes the renders read as real.
+ */
+function Look() {
+  const { gl, scene, camera, size } = useThree();
+  const composer = useMemo(() => {
+    const rt = new WebGLRenderTarget(1, 1, { type: HalfFloatType, samples: 4 });
+    const c = new EffectComposer(gl, rt);
+    c.addPass(new RenderPass(scene, camera));
+    const ao = new GTAOPass(scene, camera, 1, 1);
+    ao.updateGtaoMaterial({ radius: 0.9, distanceExponent: 1.4, thickness: 1.2, scale: 1.1, samples: 12 });
+    ao.blendIntensity = 0.85;
+    c.addPass(ao);
+    c.addPass(new OutputPass());
+    return c;
+  }, [gl, scene, camera]);
+  useEffect(() => {
+    composer.setPixelRatio(gl.getPixelRatio());
+    composer.setSize(size.width, size.height);
+  }, [composer, gl, size]);
+  useEffect(() => () => composer.dispose(), [composer]);
+  useFrame(() => composer.render(), 1);
+  return null;
 }
 
 function People({ store }: { store: Bodies }) {
@@ -88,25 +128,31 @@ function People({ store }: { store: Bodies }) {
   );
 }
 
-export default function Stage({ view, rooms, board, store }: { view: StageView; rooms: Partial<Record<RoomId, RoomState>>; board?: Board; store: Bodies }) {
+export default function Stage({ getCam, rooms, board, store }: { getCam: () => Cam | null; rooms: Partial<Record<RoomId, RoomState>>; board?: Board; store: Bodies }) {
   const pieces = FURNITURE.filter(inLayout);
   return (
     <Canvas
       className="!absolute inset-0"
       style={{ pointerEvents: "none" }}
-      camera={{ manual: true }}
       dpr={[1, 1.75]}
-      shadows={{ type: VSMShadowMap }}
-      gl={{ antialias: true, alpha: true, toneMapping: NeutralToneMapping, toneMappingExposure: 1.05 }}
+      shadows={{ type: PCFSoftShadowMap }}
+      gl={{ antialias: false, alpha: true, toneMapping: ACESFilmicToneMapping, toneMappingExposure: 1.0 }}
       frameloop="always"
     >
-      <Camera view={view} />
-      <Lights />
-      <Building rooms={rooms} />
-      {pieces.map((f, i) => (
-        <Piece key={f.id} f={f} index={i} board={f.kind === "board" ? board : undefined} state={f.room === "hall" ? "built" : (rooms[f.room] ?? "hidden")} />
-      ))}
-      <People store={store} />
+      {/* the page's own background, so nothing flashes black while the office loads */}
+      <color attach="background" args={["#ece6dc"]} />
+      <CameraRig getCam={getCam} />
+      <Sun />
+      {/* everything appears together, once the floor, walls and lighting have loaded */}
+      <Suspense fallback={null}>
+        <Daylight />
+        <Building rooms={rooms} />
+        {pieces.map((f, i) => (
+          <Piece key={f.id} f={f} index={i} board={f.kind === "board" ? board : undefined} state={f.room === "hall" ? "built" : (rooms[f.room] ?? "hidden")} />
+        ))}
+        <People store={store} />
+      </Suspense>
+      <Look />
     </Canvas>
   );
 }
