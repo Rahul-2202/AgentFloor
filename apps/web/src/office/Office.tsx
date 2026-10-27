@@ -1,11 +1,15 @@
 "use client";
 
 import { AnimatePresence, animate, motion, useMotionValue, useMotionValueEvent, useSpring, type MotionValue } from "motion/react";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import dynamic from "next/dynamic";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar, type AgentHandlers } from "./Avatar";
-import { FurnitureArt, HAS_BACK } from "./Furniture";
-import { CAST, FURNITURE, ROOMS, SIZE, TILE, WALL_ITEMS, WORLD, inLayout, spot, type RoomDef } from "./layout";
+import { CAST, ROOMS, TILE, WORLD, spot, type RoomDef } from "./layout";
+import { Bodies, BodiesContext } from "./three/bodies";
 import type { Camera, PropScene, RoomId, RoomState, Scene } from "./types";
+
+// The office is drawn in 3D (three.js) under the 2D layer of tags, bubbles and cards.
+const Stage = dynamic(() => import("./three/Stage"), { ssr: false });
 
 const EASE_CAM = [0.65, 0, 0.35, 1] as const;
 
@@ -24,139 +28,6 @@ function resolveCamera(c: Scene["camera"]): Camera {
 }
 
 /* ------------------------------------------------------------------ rooms */
-
-function floorPattern(r: RoomDef) {
-  const id = `fl-${r.id}`;
-  if (r.pattern === "planks")
-    return (
-      <pattern id={id} width={32} height={12} patternUnits="userSpaceOnUse">
-        <rect width={32} height={12} fill={r.floor} />
-        <rect y={5} width={32} height={1} fill={r.floorLine} />
-        <rect y={11} width={32} height={1} fill={r.floorLine} />
-        <rect x={10} width={1} height={6} fill={r.floorLine} />
-        <rect x={26} y={6} width={1} height={6} fill={r.floorLine} />
-      </pattern>
-    );
-  if (r.pattern === "herring")
-    return (
-      <pattern id={id} width={16} height={16} patternUnits="userSpaceOnUse">
-        <rect width={16} height={16} fill={r.floor} />
-        <rect width={8} height={8} fill={r.floorLine} />
-        <rect x={8} y={8} width={8} height={8} fill={r.floorLine} />
-      </pattern>
-    );
-  return (
-    <pattern id={id} width={8} height={8} patternUnits="userSpaceOnUse">
-      <rect width={8} height={8} fill={r.floor} />
-      <rect width={1} height={1} fill={r.floorLine} />
-      <rect x={4} y={4} width={1} height={1} fill={r.floorLine} />
-    </pattern>
-  );
-}
-
-const WALL_DARK = "#4a413a";
-
-function BuiltRoom({ r }: { r: RoomDef }) {
-  const W = r.w * TILE;
-  const H = r.h * TILE;
-  const face = 2 * TILE;
-  const dx = r.door.at * TILE;
-  const dw = r.door.w * TILE;
-  const shadeWall = "#e2d9cb";
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", overflow: "visible" }}>
-      <defs>{floorPattern(r)}</defs>
-      <rect x={0} y={face} width={W} height={H - face} fill={`url(#fl-${r.id})`} />
-      {/* soft shadow under the top wall */}
-      <rect x={0} y={face} width={W} height={3} fill="rgba(0,0,0,0.06)" />
-      {/* top wall face */}
-      <rect x={0} y={0} width={W} height={face} fill={r.wall} />
-      <rect x={0} y={face - 9} width={W} height={7} fill={shadeWall} />
-      <rect x={0} y={face - 2} width={W} height={2} fill="#c8b9a3" />
-      <rect x={0} y={0} width={W} height={4} fill={WALL_DARK} />
-      {r.door.side === "top" && (
-        <>
-          <rect x={dx} y={0} width={dw} height={face + 1} fill={`url(#fl-${r.id})`} />
-          <rect x={dx - 2} y={0} width={2} height={face} fill={WALL_DARK} />
-          <rect x={dx + dw} y={0} width={2} height={face} fill={WALL_DARK} />
-          <rect x={dx} y={0} width={dw} height={3} fill="rgba(0,0,0,0.08)" />
-        </>
-      )}
-      {/* side + bottom walls */}
-      <rect x={-2} y={0} width={4} height={H + 2} fill={WALL_DARK} />
-      <rect x={W - 2} y={0} width={4} height={H + 2} fill={WALL_DARK} />
-      {r.door.side === "bottom" ? (
-        <>
-          <rect x={-2} y={H - 2} width={dx + 2} height={4} fill={WALL_DARK} />
-          <rect x={dx + dw} y={H - 2} width={W - dx - dw + 2} height={4} fill={WALL_DARK} />
-          <rect x={dx + 4} y={H - 5} width={dw - 8} height={5} rx={1} fill="rgba(74,65,58,0.18)" />
-        </>
-      ) : (
-        <rect x={-2} y={H - 2} width={W + 4} height={4} fill={WALL_DARK} />
-      )}
-    </svg>
-  );
-}
-
-function BlueprintRoom({ r, ghost }: { r: RoomDef; ghost: boolean }) {
-  const W = r.w * TILE;
-  const H = r.h * TILE;
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", overflow: "visible", shapeRendering: "geometricPrecision" }}>
-      <defs>
-        <pattern id={`bp-${r.id}`} width={16} height={16} patternUnits="userSpaceOnUse">
-          <path d="M16 0H0V16" fill="none" stroke={ghost ? "rgba(232,116,59,0.14)" : "rgba(90,80,70,0.08)"} strokeWidth={0.5} />
-        </pattern>
-      </defs>
-      <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={3} fill={ghost ? "rgba(255,248,242,0.75)" : "rgba(255,255,255,0.35)"} />
-      <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={3} fill={`url(#bp-${r.id})`} />
-      <rect
-        x={0.5}
-        y={0.5}
-        width={W - 1}
-        height={H - 1}
-        rx={3}
-        fill="none"
-        stroke={ghost ? "rgba(232,116,59,0.55)" : "rgba(90,80,70,0.32)"}
-        strokeWidth={1}
-        strokeDasharray="4 3"
-        vectorEffect="non-scaling-stroke"
-      />
-    </svg>
-  );
-}
-
-function Room({ r, state }: { r: RoomDef; state: RoomState }) {
-  return (
-    <div className="absolute" style={{ left: r.x * TILE, top: r.y * TILE, width: r.w * TILE, height: r.h * TILE }}>
-      <AnimatePresence initial={false}>
-        {state === "built" ? (
-          <motion.div
-            key="built"
-            className="absolute inset-0"
-            initial={{ clipPath: "inset(0% 0% 100% 0%)", opacity: 0.4 }}
-            animate={{ clipPath: "inset(-10% -10% -10% -10%)", opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <BuiltRoom r={r} />
-          </motion.div>
-        ) : (
-          <motion.div
-            key={`bp-${state}`}
-            className="absolute inset-0"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            <BlueprintRoom r={r} ghost={state === "ghost"} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
 
 function RoomLabel({ r, state, count, locked, note }: { r: RoomDef; state: RoomState; count: number; locked: boolean; note?: string }) {
   if (state === "built")
@@ -321,6 +192,7 @@ export function Office({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
+  const bodies = useMemo(() => new Bodies(), []);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const s = useMotionValue(1);
   const tx = useMotionValue(0);
@@ -459,10 +331,12 @@ export function Office({
     if (m && m.room !== "ceo" && !m.human) counts[m.room] = (counts[m.room] ?? 0) + 1;
   });
 
-  const visibleFurniture = FURNITURE.filter((f) => inLayout(f) && (f.room === "hall" || roomState(f.room) !== "hidden"));
+  const view = useMemo(() => ({ s, x: follow ? springX : tx, y: follow ? springY : ty }), [s, follow, springX, springY, tx, ty]);
 
   return (
+    <BodiesContext.Provider value={bodies}>
     <div ref={box} className={`relative h-full w-full overflow-hidden ${rounded ? "rounded-[inherit]" : ""} ${className ?? ""}`} style={{ background: "#e9e3d8" }}>
+      {near && size && <Stage view={view} rooms={scene.rooms} board={scene.board} store={bodies} />}
       {near && (
       <motion.div
         ref={world}
@@ -480,47 +354,6 @@ export function Office({
         }}
         onClick={onClickWorld}
       >
-        {/* hallway floor */}
-        <svg className="absolute inset-0" width={WORLD.w * TILE} height={WORLD.h * TILE}>
-          <defs>
-            <pattern id="hall" width={16} height={16} patternUnits="userSpaceOnUse">
-              <rect width={16} height={16} fill="#f0ebe2" />
-              <rect width={16} height={1} fill="#e9e2d7" />
-              <rect width={1} height={16} fill="#e9e2d7" />
-            </pattern>
-          </defs>
-          <rect x={0} y={0} width={WORLD.w * TILE} height={WORLD.h * TILE} fill="url(#hall)" />
-          <rect x={0} y={0} width={WORLD.w * TILE} height={WORLD.h * TILE} fill="none" stroke={WALL_DARK} strokeWidth={4} />
-        </svg>
-
-        {Object.values(ROOMS).map((r) => (roomState(r.id) === "hidden" ? null : <Room key={r.id} r={r} state={roomState(r.id)} />))}
-
-        {/* furniture + people share one z-sorted layer */}
-        {visibleFurniture.map((f, i) => {
-          const st = f.room === "hall" ? "built" : roomState(f.room);
-          const built = st === "built";
-          const [, fh] = f.kind === "rug" ? [0, (f.h ?? 3) * TILE] : SIZE[f.kind];
-          const wall = WALL_ITEMS.includes(f.kind) || f.kind === "rug";
-          const zFront = wall ? 1 : Math.round(f.y * TILE + fh);
-          const common = {
-            initial: false as const,
-            animate: built ? { opacity: 1, y: [-6, 0], filter: "grayscale(0)" } : { opacity: st === "ghost" ? 0 : 0.13, y: 0, filter: "grayscale(1)" },
-            transition: { duration: 0.55, delay: built ? 0.35 + (i % 9) * 0.05 : 0, ease: [0.22, 1, 0.36, 1] as const },
-          };
-          return (
-            <Fragment key={f.id}>
-              {HAS_BACK.has(f.kind) && (
-                <motion.div className="absolute" style={{ left: f.x * TILE, top: f.y * TILE, zIndex: Math.round(f.y * TILE) }} {...common}>
-                  <FurnitureArt f={f} layer="back" />
-                </motion.div>
-              )}
-              <motion.div className="absolute" style={{ left: f.x * TILE, top: f.y * TILE, zIndex: zFront }} {...common}>
-                <FurnitureArt f={f} board={scene.board} />
-              </motion.div>
-            </Fragment>
-          );
-        })}
-
         <AnimatePresence>
           {agents.map(([id, a]) => {
             const m = CAST[id];
@@ -553,5 +386,6 @@ export function Office({
       </motion.div>
       )}
     </div>
+    </BodiesContext.Provider>
   );
 }

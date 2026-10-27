@@ -1,4 +1,4 @@
-import type { Look } from "./sprites";
+import type { Look } from "./look";
 import type { Pt, RoomId } from "./types";
 
 export const TILE = 16;
@@ -403,7 +403,7 @@ export const CAST: Record<string, CastMember> = {
     name: "You",
     role: "CEO",
     room: "ceo",
-    look: { skin: "#f1c7a5", hair: "#2b2522", style: "short", shirt: "#1d1d1f", accent: "#3a3a3d", pants: "#3a4a63" },
+    look: { skin: "#f1c7a5", hair: "#2b2522", style: "short", shirt: "#4f9a6a", accent: "#3f8159", pants: "#3a4a63" },
   },
   ada: {
     id: "ada",

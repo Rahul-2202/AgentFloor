@@ -220,7 +220,7 @@ export function SignIn({
               run by AI agents.
             </motion.h1>
             <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15, duration: 0.6 }} className="mt-4 text-[15px] leading-relaxed text-muted">
-              Hire agents into rooms, hand them work, and watch them build it in a pixel office. Ada runs the place. You decide what ships.
+              Hire agents into rooms, hand them work, and watch them build it in your own office. Ada runs the place. You decide what ships.
             </motion.p>
 
             <ul className="mt-6 flex flex-col gap-3">

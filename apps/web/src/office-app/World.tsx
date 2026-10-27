@@ -2,15 +2,16 @@
 
 import { AnimatePresence, animate, motion, useMotionValue, useMotionValueEvent, useTransform } from "motion/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { PersonSvg } from "@/office/Avatar";
+import { FIGURE } from "@/office/Avatar";
 import { CAST, ROOMS, SPOTS, TILE, WORLD, spot } from "@/office/layout";
 import { Office } from "@/office/Office";
-import { personSprite } from "@/office/sprites";
+import { useBody } from "@/office/three/bodies";
 import type { Pt, RoomId, Scene } from "@/office/types";
 import { useSim, type SimState } from "@/sim/store";
 import { AgentCard } from "./cards/AgentCard";
 import { AdaCard } from "./cards/AdaCard";
 import { HoverTag } from "./cards/HoverTag";
+import { RightNow } from "./RightNow";
 import { RoomBar } from "./RoomBar";
 import { useUI } from "./ui";
 import { nearestFree, usePlayer } from "./usePlayer";
@@ -24,22 +25,12 @@ export function homeOf(id: string, s: Pick<SimState, "layout">) {
 
 function Player({ x, y, walking, who, bubble }: { x: ReturnType<typeof usePlayer>["x"]; y: ReturnType<typeof usePlayer>["y"]; walking: boolean; who: string; bubble?: string | null }) {
   const look = (CAST[who] ?? CAST.you).look;
-  const sp = personSprite(look);
+  useBody({ id: `player:${who}`, look, x, y, walking });
+  const sp = FIGURE;
   const z = useTransform(y, (v) => Math.round(v) + 3);
   return (
     <motion.div className="pointer-events-none absolute left-0 top-0" style={{ x, y, zIndex: z }}>
-      <div className={walking ? "walking" : "idle"} style={{ position: "absolute", left: -sp.w / 2, top: -sp.h, width: sp.w, height: sp.h }}>
-        <div className="absolute left-1/2 -translate-x-1/2 rounded-[50%]" style={{ width: 18, height: 6, bottom: -3, background: "rgba(10,10,10,0.18)", boxShadow: "0 0 0 1px rgba(10,10,10,0.35)" }} />
-        <div className="body-bob absolute inset-0">
-          {walking ? (
-            <>
-              <PersonSvg look={look} frame={1} className="frame-a absolute inset-0" />
-              <PersonSvg look={look} frame={2} className="frame-b absolute inset-0" eyes={false} />
-            </>
-          ) : (
-            <PersonSvg look={look} frame={0} className="absolute inset-0" />
-          )}
-        </div>
+      <div style={{ position: "absolute", left: -sp.w / 2, top: -sp.h, width: sp.w, height: sp.h }}>
         <div className="absolute bottom-full left-1/2" style={{ width: 0 }}>
           <div className="counter absolute bottom-[3px] left-0 flex -translate-x-1/2 flex-col items-center gap-1 whitespace-nowrap" style={{ ["--origin" as string]: "50% 100%" }}>
             <AnimatePresence>
@@ -484,6 +475,8 @@ export function World() {
       </Office>
 
       <RoomBar room={room} />
+
+      <RightNow hidden={!!cardId || !!ui.panel || !!ui.win} onOpen={openAgent} />
 
       <Minimap
         px={player.x}
