@@ -1,71 +1,63 @@
 "use client";
 
-import { AnimatePresence, animate, motion, useMotionValue, type AnimationPlaybackControls } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, useTransform, type AnimationPlaybackControls } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { BrandIcon } from "@/components/brands";
-import { portrait } from "./three/portrait";
-import type { Look } from "./look";
+import { personSprite, type Look } from "./sprites";
 import { findPath } from "./path";
 import { spot, TILE, type CastMember } from "./layout";
-import { useBody } from "./three/bodies";
-import { RISE } from "./camera";
-import { usePin } from "./floor";
-import { seatFacing } from "./three/Person";
 import type { AgentScene, AgentStatus, Bubble, Pt } from "./types";
 
 const WALK_SPEED = 3.4; // tiles per second
 
-/** How tall the 3D figures stand (units): tags sit just above. */
-export const FIG_H = 2.8;
+export function PersonSvg({ look, frame = 0, className, eyes = true }: { look: Look; frame?: 0 | 1 | 2; className?: string; eyes?: boolean }) {
+  const s = personSprite(look);
+  return (
+    <svg className={className} width={s.w} height={s.h} viewBox={`0 0 ${s.w} ${s.h}`} style={{ display: "block", shapeRendering: "crispEdges" }}>
+      {s.frames[frame].map((p) => (
+        <path key={p.fill} d={p.d} fill={p.fill} />
+      ))}
+      {eyes && (
+        <g className="eyes">
+          {s.eyes.map((p) => (
+            <path key={p.fill} d={p.d} fill={p.fill} />
+          ))}
+        </g>
+      )}
+    </svg>
+  );
+}
 
-/** Head-and-shoulders picture of the 3D figure, used in tags, cards and lists. */
-export function Portrait({ look, size = 32, className, bg, chief = false, round = false }: { look: Look; size?: number; className?: string; bg?: string; chief?: boolean; round?: boolean }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    setUrl(portrait(look, chief));
-  }, [look, chief]);
+/** Head-and-shoulders crop, used inside UI cards. */
+export function Portrait({ look, size = 32, className, bg }: { look: Look; size?: number; className?: string; bg?: string }) {
+  const s = personSprite(look);
+  const crop = 12;
   return (
     <div
       className={className}
       style={{
         width: size,
         height: size,
-        borderRadius: round ? "50%" : size * 0.3,
+        borderRadius: size * 0.3,
         background: bg ?? "#f1ede6",
         overflow: "hidden",
         position: "relative",
         flexShrink: 0,
       }}
     >
-      {url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt="" width={size} height={size} style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} draggable={false} />
-      )}
+      <svg
+        viewBox={`0 0 ${s.w} ${crop}`}
+        width={size * 0.8}
+        height={(size * 0.8 * crop) / s.w}
+        style={{ position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)", shapeRendering: "crispEdges" }}
+      >
+        {s.frames[0].map((p) => (
+          <path key={p.fill} d={p.d} fill={p.fill} />
+        ))}
+        {s.eyes.map((p) => (
+          <path key={p.fill} d={p.d} fill={p.fill} />
+        ))}
+      </svg>
     </div>
-  );
-}
-
-/** A tag's colour per agent: their sweater, deepened so white text reads on it. */
-export function tagColor(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => v / 255) as [number, number, number];
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  const d = max - min;
-  let h = 0;
-  if (d) h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  const sat = d ? d / (1 - Math.abs(2 * l - 1)) : 0;
-  return `hsl(${Math.round(h * 60 + 360) % 360} ${Math.round(Math.max(0.28, Math.min(0.6, sat)) * 100)}% ${l < 0.2 ? 22 : 33}%)`;
-}
-
-function RuntimeBadge({ runtime }: { runtime?: string }) {
-  if (!runtime) return null;
-  const name = /claude/i.test(runtime) ? "Claude" : /codex/i.test(runtime) ? "Codex" : runtime;
-  return (
-    <span className="grid h-[14px] w-[14px] place-items-center rounded-[4px] bg-white" title={runtime}>
-      <BrandIcon name={name} size={name === "Codex" ? 14 : 10} />
-    </span>
   );
 }
 
@@ -137,6 +129,7 @@ export function Avatar({
   const x = useMotionValue(start[0] * TILE);
   const y = useMotionValue(start[1] * TILE);
   const lifted = Boolean(scene.bubble || scene.emote);
+  const z = useTransform(y, (v) => Math.round(v) + 2 + (lifted ? 2000 : 0));
   const [walking, setWalking] = useState(false);
   const ctl = useRef<AnimationPlaybackControls[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -191,54 +184,53 @@ export function Avatar({
 
   useEffect(() => () => ctl.current.forEach((c) => c.stop()), []);
 
-  const feet = useRef<HTMLDivElement>(null);
-  const head = useRef<HTMLDivElement>(null);
-  const where = (): Pt => [x.get() / TILE, y.get() / TILE];
-  usePin(feet, where, 0, 0);
-  // Seated people's heads are lower: keep their tags just above them.
-  const seated = !walking && seatFacing(typeof scene.at === "string" ? scene.at : undefined) !== null;
-  usePin(head, where, seated ? FIG_H - 0.6 : FIG_H, lifted ? 2000 : 1);
-  useBody({ id: member.id, look: member.look, x, y, walking, status: scene.status, at: typeof scene.at === "string" ? scene.at : undefined, highlight: handlers?.highlight });
+  const s = personSprite(member.look);
   const bubble: Bubble | null = scene.bubble ? (typeof scene.bubble === "string" ? { text: scene.bubble } : scene.bubble) : null;
   const status = scene.status;
 
   return (
-    <>
-      <motion.div
-        ref={feet}
-        className="absolute left-0 top-0"
-        data-agent={member.id}
-        style={{ width: 0, height: 0 }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0, transition: { duration: 0.35 } }}
-        transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
-      >
-        {/* the figure's outline on screen, for hovering and clicking */}
-        <div
-          className={`absolute ${handlers ? "cursor-pointer" : "pointer-events-none"}`}
-          style={{ left: "calc(var(--u) * -0.5)", width: "calc(var(--u) * 1)", bottom: "calc(var(--u) * -0.15)", height: `calc(var(--u) * ${(FIG_H * RISE).toFixed(2)})` }}
-          onPointerEnter={handlers?.onEnter}
-          onPointerLeave={handlers?.onLeave}
-          onClick={(e) => {
-            if (!handlers) return;
-            e.stopPropagation();
-            handlers.onClick?.();
-          }}
-        />
-      </motion.div>
-      <motion.div
-        ref={head}
-        className="pointer-events-none absolute left-0 top-0"
-        style={{ width: 0, height: 0 }}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0, transition: { duration: 0.35 } }}
-        transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
-      >
+    <motion.div
+      className="absolute left-0 top-0"
+      data-agent={member.id}
+      style={{ x, y, zIndex: z }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0, transition: { duration: 0.35 } }}
+      transition={{ duration: 0.5, delay: scene.delay ?? 0 }}
+    >
+      <div className={walking ? "walking" : "idle"} style={{ position: "absolute", left: -s.w / 2, top: -s.h, width: s.w, height: s.h }}>
+        {handlers?.highlight && (
+          <div
+            className="absolute left-1/2 -translate-x-1/2 rounded-[50%]"
+            style={{ width: 20, height: 7, bottom: -3.5, background: "rgba(232,116,59,0.35)", boxShadow: "0 0 0 1px rgba(232,116,59,0.8)" }}
+          />
+        )}
+        <div className="absolute left-1/2 -translate-x-1/2 rounded-[50%] bg-black/15" style={{ width: 12, height: 3, bottom: -1 }} />
+        {handlers && (
+          <div
+            className="absolute -inset-x-1 -bottom-1 -top-1 z-10 cursor-pointer"
+            onPointerEnter={handlers.onEnter}
+            onPointerLeave={handlers.onLeave}
+            onClick={(e) => {
+              e.stopPropagation();
+              handlers.onClick?.();
+            }}
+          />
+        )}
+        <div className="body-bob absolute inset-0">
+          {walking ? (
+            <>
+              <PersonSvg look={member.look} frame={1} className="frame-a absolute inset-0" />
+              <PersonSvg look={member.look} frame={2} className="frame-b absolute inset-0" eyes={false} />
+            </>
+          ) : (
+            <PersonSvg look={member.look} frame={0} className="absolute inset-0" />
+          )}
+        </div>
+
         {/* Above the head */}
-        <div style={{ width: 0, height: 0 }}>
-          <div className="absolute bottom-[4px] left-0 flex -translate-x-1/2 flex-col items-center gap-1">
+        <div className="pointer-events-none absolute left-1/2 bottom-full" style={{ width: 0, height: 0 }}>
+          <div className="counter absolute bottom-[3px] left-0 flex -translate-x-1/2 flex-col items-center gap-1" style={{ ["--origin" as string]: "50% 100%" }}>
             <AnimatePresence mode="popLayout">
               {bubble && (
                 <motion.div
@@ -269,15 +261,16 @@ export function Avatar({
                 </motion.div>
               )}
             </AnimatePresence>
-            {labels ? (
-              <div
-                className="flex items-center gap-1 whitespace-nowrap rounded-full py-[2px] pl-[2px] pr-[5px] text-[10px] font-semibold text-white shadow-[0_2px_6px_rgba(0,0,0,0.22)]"
-                style={{ background: member.id === "ada" ? "#e8743b" : member.human ? "#ffffff" : tagColor(member.look.shirt), color: member.human ? "var(--ink)" : "#fff" }}
-              >
-                <Portrait look={member.look} size={16} round bg="rgba(255,255,255,0.9)" chief={member.id === "ada"} />
-                <span className="px-[1px]">{member.name}</span>
-                <RuntimeBadge runtime={member.runtime} />
+            {labels && member.human ? (
+              <div className="flex items-center gap-1 whitespace-nowrap rounded-full bg-[#2b4fb8] py-[1px] pl-1 pr-1.5 text-[10px] font-semibold text-white shadow-[0_1px_4px_rgba(0,0,0,0.18)]">
+                <span className="h-[6px] w-[6px] rounded-full ring-1 ring-white/70" style={{ background: status === "away" ? "#c7c3bc" : status === "meeting" ? "#b9a8ff" : "#5fd08a" }} />
+                {member.name}
+                {member.real && <span className="rounded-full bg-[#ff5a4f] px-1 text-[7.5px] font-bold uppercase tracking-wide">Live</span>}
+              </div>
+            ) : labels ? (
+              <div className="flex items-center gap-1 whitespace-nowrap rounded-full bg-white/90 py-[1px] pl-1 pr-1.5 text-[10px] font-semibold text-ink-2 shadow-[0_1px_4px_rgba(0,0,0,0.12)]">
                 <StatusDot status={status} />
+                {member.name}
               </div>
             ) : (
               status && status !== "idle" && <StatusDot status={status} />
@@ -294,14 +287,16 @@ export function Avatar({
                 className="absolute"
                 style={{ left: 5, bottom: -9 }}
               >
-                <div className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-bad px-1 text-[10px] font-bold text-white ring-2 ring-white">
-                  {scene.badge}
+                <div className="counter" style={{ ["--origin" as string]: "0% 100%" }}>
+                  <div className="grid h-[16px] min-w-[16px] place-items-center rounded-full bg-bad px-1 text-[10px] font-bold text-white ring-2 ring-white">
+                    {scene.badge}
+                  </div>
                 </div>
               </motion.div>
             ) : null}
           </AnimatePresence>
         </div>
-      </motion.div>
-    </>
+      </div>
+    </motion.div>
   );
 }

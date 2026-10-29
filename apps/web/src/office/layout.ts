@@ -1,10 +1,8 @@
-import type { Look } from "./look";
+import type { Look } from "./sprites";
 import type { Pt, RoomId } from "./types";
 
 export const TILE = 16;
-export const WORLD = { w: 64, h: 28 };
-/** The commons wing (café, lounge, library, booths) starts here. */
-export const COMMONS_X = 50;
+export const WORLD = { w: 50, h: 28 };
 
 export interface RoomDef {
   id: RoomId;
@@ -140,16 +138,7 @@ export type FurnitureKind =
   | "chartboard"
   | "safe"
   | "cabinet"
-  | "frame"
-  // the commons wing
-  | "counter"
-  | "cafeTable"
-  | "barStool"
-  | "sofa"
-  | "armchair"
-  | "coffeeTable"
-  | "booth"
-  | "bookcase";
+  | "frame";
 
 export interface Furniture {
   id: string;
@@ -192,14 +181,6 @@ export const SIZE: Record<FurnitureKind, [number, number]> = {
   safe: [18, 16],
   cabinet: [16, 24],
   frame: [16, 14],
-  counter: [0, 0],
-  cafeTable: [20, 20],
-  barStool: [10, 10],
-  sofa: [48, 20],
-  armchair: [20, 20],
-  coffeeTable: [24, 20],
-  booth: [40, 48],
-  bookcase: [32, 30],
 };
 
 /** Walk-blocking footprint, in tiles, relative to the piece's position. */
@@ -215,17 +196,7 @@ export const BLOCK: Partial<Record<FurnitureKind, [number, number, number, numbe
   cooler: [0, 0.5, 0.75, 1],
   safe: [0, 0.5, 1, 0.5],
   cabinet: [0, 0.75, 1, 0.75],
-  cafeTable: [0, 0, 1.25, 1.25],
-  barStool: [0, 0, 0.6, 0.6],
-  sofa: [0, 0, 3, 0.55],
-  armchair: [0, 0, 1.25, 1.25],
-  coffeeTable: [0, 0, 1.5, 1.25],
-  booth: [0, 0, 2.5, 0.9],
-  bookcase: [0, 0, 2, 0.7],
 };
-
-/** Pieces sized by their own w × h that block walking. */
-export const SOLID_BY_SIZE: FurnitureKind[] = ["counter"];
 
 export const WALL_ITEMS: FurnitureKind[] = ["board", "window", "tv", "moodboard", "leaderboard", "chartboard", "frame"];
 
@@ -300,33 +271,6 @@ export const FURNITURE: Furniture[] = [
   { id: "dev-sam", room: "dev", kind: "desk", x: 24.5, y: 7.5, app: true },
   { id: "mkt-marco", room: "marketing", kind: "desk", x: 38, y: 7.5, app: true },
   { id: "mkt-lena", room: "marketing", kind: "desk", x: 43.2, y: 10, app: true },
-
-  // The commons wing: café, lounge, library and phone booths (always open)
-  { id: "cafe-counter", room: "hall", kind: "counter", x: 51.5, y: 3.15, w: 9, h: 1.3 },
-  { id: "cafe-stool1", room: "hall", kind: "barStool", x: 52.4, y: 4.9 },
-  { id: "cafe-stool2", room: "hall", kind: "barStool", x: 54.4, y: 4.9 },
-  { id: "cafe-stool3", room: "hall", kind: "barStool", x: 56.4, y: 4.9 },
-  { id: "cafe-stool4", room: "hall", kind: "barStool", x: 58.4, y: 4.9 },
-  { id: "cafe-t1", room: "hall", kind: "cafeTable", x: 52.4, y: 7.6 },
-  { id: "cafe-t2", room: "hall", kind: "cafeTable", x: 56.4, y: 8.4 },
-  { id: "cafe-t3", room: "hall", kind: "cafeTable", x: 60.6, y: 7.4 },
-  { id: "cafe-plant", room: "hall", kind: "plant", x: 62.6, y: 2.6 },
-  { id: "cafe-plant2", room: "hall", kind: "plant", x: 62.7, y: 9.9 },
-  { id: "lounge-rug", room: "hall", kind: "rug", x: 51.2, y: 16, w: 7.4, h: 5, tint: "#e6dccb" },
-  { id: "lounge-sofa", room: "hall", kind: "sofa", x: 53.4, y: 16.3 },
-  { id: "lounge-table", room: "hall", kind: "coffeeTable", x: 54.15, y: 18.2 },
-  { id: "lounge-arm1", room: "hall", kind: "armchair", x: 51.6, y: 18.3 },
-  { id: "lounge-arm2", room: "hall", kind: "armchair", x: 57, y: 18.3 },
-  { id: "lib-shelf1", room: "hall", kind: "bookcase", x: 59.6, y: 15.4 },
-  { id: "lib-shelf2", room: "hall", kind: "bookcase", x: 61.7, y: 15.4 },
-  { id: "lib-chair", room: "hall", kind: "armchair", x: 60.9, y: 18 },
-  { id: "lib-plant", room: "hall", kind: "plant", x: 62.8, y: 20.2 },
-  { id: "booth-1", room: "hall", kind: "booth", x: 50.9, y: 22.3 },
-  { id: "booth-2", room: "hall", kind: "booth", x: 53.9, y: 22.3 },
-  { id: "booth-3", room: "hall", kind: "booth", x: 56.9, y: 22.3 },
-  { id: "booth-4", room: "hall", kind: "booth", x: 59.9, y: 22.3 },
-  { id: "booth-plant", room: "hall", kind: "plant", x: 62.8, y: 24.6 },
-  { id: "commons-plant", room: "hall", kind: "plantSmall", x: 50.4, y: 12.4 },
 
   // Hallway
   { id: "hall-cooler", room: "hall", kind: "cooler", x: 24.6, y: 12.05 },
@@ -426,19 +370,6 @@ export const SPOTS: Record<string, Pt> = {
   "lobby:2": [4, 13.6],
   "lobby:3": [5.4, 13.5],
 
-  // The commons wing
-  "cafe:1": [53.0, 9.4],
-  "cafe:2": [57.0, 10.2],
-  "cafe:3": [61.2, 9.2],
-  "cafe:4": [54.6, 9.6],
-  "lounge:1": [54.3, 17.0],
-  "lounge:2": [55.7, 17.0],
-  "booth:1": [52.15, 23.8],
-  "booth:2": [55.15, 23.8],
-  "booth:3": [58.15, 23.8],
-  "booth:4": [61.15, 23.8],
-  "commons:mid": [56, 13.6],
-
   // Hallway
   "hall:entry": [0.75, 13.5],
   "hall:mid": [25, 13.6],
@@ -472,7 +403,7 @@ export const CAST: Record<string, CastMember> = {
     name: "You",
     role: "CEO",
     room: "ceo",
-    look: { skin: "#f1c7a5", hair: "#2b2522", style: "short", shirt: "#4f9a6a", accent: "#3f8159", pants: "#3a4a63" },
+    look: { skin: "#f1c7a5", hair: "#2b2522", style: "short", shirt: "#1d1d1f", accent: "#3a3a3d", pants: "#3a4a63" },
   },
   ada: {
     id: "ada",

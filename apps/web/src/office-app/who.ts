@@ -1,5 +1,5 @@
 import { CAST, ROOMS, SPOTS, setAppLayout, type CastMember } from "@/office/layout";
-import type { Look } from "@/office/look";
+import type { Look } from "@/office/sprites";
 import type { RoomId } from "@/office/types";
 import type { OfficeSetupView } from "@/lib/api";
 import type { Layout } from "@/sim/real";

@@ -30,7 +30,7 @@ export function Dot({ status }: { status: AgentStatus }) {
 export function Face({ id, size = 28 }: { id: string; size?: number }) {
   const m = CAST[id];
   if (!m) return <span className="grid place-items-center rounded-[9px] bg-ink text-[11px] font-bold text-white" style={{ width: size, height: size }}>?</span>;
-  return <Portrait look={m.look} size={size} chief={id === "ada"} bg={id === "ada" ? "#fbe9de" : id === "you" ? "#e9e6df" : undefined} />;
+  return <Portrait look={m.look} size={size} bg={id === "ada" ? "#fbe9de" : id === "you" ? "#e9e6df" : undefined} />;
 }
 
 export const TASK_STATE: Record<TaskState, { l: string; cls: string }> = {
