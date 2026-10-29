@@ -18,7 +18,7 @@ const newsreader = Newsreader({
 
 export const metadata: Metadata = {
   title: "AgentFloor",
-  description: "Run a company of AI agents from a 3D office.",
+  description: "Run a company of AI agents from a pixel office.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

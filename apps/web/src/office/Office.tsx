@@ -1,17 +1,11 @@
 "use client";
 
-import { AnimatePresence, animate, motion, useMotionValue, useSpring, type MotionValue } from "motion/react";
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, animate, motion, useMotionValue, useMotionValueEvent, useSpring, type MotionValue } from "motion/react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Avatar, type AgentHandlers } from "./Avatar";
-import { FLOOR_DEPTH, unproject, type Cam } from "./camera";
-import { FloorContext, FloorLayer, OnFloor } from "./floor";
-import { CAST, ROOMS, TILE, WORLD, spot, type RoomDef } from "./layout";
-import { Bodies, BodiesContext } from "./three/bodies";
+import { FurnitureArt, HAS_BACK } from "./Furniture";
+import { CAST, FURNITURE, ROOMS, SIZE, TILE, WALL_ITEMS, WORLD, inLayout, spot, type RoomDef } from "./layout";
 import type { Camera, PropScene, RoomId, RoomState, Scene } from "./types";
-
-// The office is drawn in 3D (three.js) under the 2D layer of tags, bubbles and cards.
-const Stage = dynamic(() => import("./three/Stage"), { ssr: false });
 
 const EASE_CAM = [0.65, 0, 0.35, 1] as const;
 
@@ -31,11 +25,144 @@ function resolveCamera(c: Scene["camera"]): Camera {
 
 /* ------------------------------------------------------------------ rooms */
 
+function floorPattern(r: RoomDef) {
+  const id = `fl-${r.id}`;
+  if (r.pattern === "planks")
+    return (
+      <pattern id={id} width={32} height={12} patternUnits="userSpaceOnUse">
+        <rect width={32} height={12} fill={r.floor} />
+        <rect y={5} width={32} height={1} fill={r.floorLine} />
+        <rect y={11} width={32} height={1} fill={r.floorLine} />
+        <rect x={10} width={1} height={6} fill={r.floorLine} />
+        <rect x={26} y={6} width={1} height={6} fill={r.floorLine} />
+      </pattern>
+    );
+  if (r.pattern === "herring")
+    return (
+      <pattern id={id} width={16} height={16} patternUnits="userSpaceOnUse">
+        <rect width={16} height={16} fill={r.floor} />
+        <rect width={8} height={8} fill={r.floorLine} />
+        <rect x={8} y={8} width={8} height={8} fill={r.floorLine} />
+      </pattern>
+    );
+  return (
+    <pattern id={id} width={8} height={8} patternUnits="userSpaceOnUse">
+      <rect width={8} height={8} fill={r.floor} />
+      <rect width={1} height={1} fill={r.floorLine} />
+      <rect x={4} y={4} width={1} height={1} fill={r.floorLine} />
+    </pattern>
+  );
+}
+
+const WALL_DARK = "#4a413a";
+
+function BuiltRoom({ r }: { r: RoomDef }) {
+  const W = r.w * TILE;
+  const H = r.h * TILE;
+  const face = 2 * TILE;
+  const dx = r.door.at * TILE;
+  const dw = r.door.w * TILE;
+  const shadeWall = "#e2d9cb";
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", overflow: "visible" }}>
+      <defs>{floorPattern(r)}</defs>
+      <rect x={0} y={face} width={W} height={H - face} fill={`url(#fl-${r.id})`} />
+      {/* soft shadow under the top wall */}
+      <rect x={0} y={face} width={W} height={3} fill="rgba(0,0,0,0.06)" />
+      {/* top wall face */}
+      <rect x={0} y={0} width={W} height={face} fill={r.wall} />
+      <rect x={0} y={face - 9} width={W} height={7} fill={shadeWall} />
+      <rect x={0} y={face - 2} width={W} height={2} fill="#c8b9a3" />
+      <rect x={0} y={0} width={W} height={4} fill={WALL_DARK} />
+      {r.door.side === "top" && (
+        <>
+          <rect x={dx} y={0} width={dw} height={face + 1} fill={`url(#fl-${r.id})`} />
+          <rect x={dx - 2} y={0} width={2} height={face} fill={WALL_DARK} />
+          <rect x={dx + dw} y={0} width={2} height={face} fill={WALL_DARK} />
+          <rect x={dx} y={0} width={dw} height={3} fill="rgba(0,0,0,0.08)" />
+        </>
+      )}
+      {/* side + bottom walls */}
+      <rect x={-2} y={0} width={4} height={H + 2} fill={WALL_DARK} />
+      <rect x={W - 2} y={0} width={4} height={H + 2} fill={WALL_DARK} />
+      {r.door.side === "bottom" ? (
+        <>
+          <rect x={-2} y={H - 2} width={dx + 2} height={4} fill={WALL_DARK} />
+          <rect x={dx + dw} y={H - 2} width={W - dx - dw + 2} height={4} fill={WALL_DARK} />
+          <rect x={dx + 4} y={H - 5} width={dw - 8} height={5} rx={1} fill="rgba(74,65,58,0.18)" />
+        </>
+      ) : (
+        <rect x={-2} y={H - 2} width={W + 4} height={4} fill={WALL_DARK} />
+      )}
+    </svg>
+  );
+}
+
+function BlueprintRoom({ r, ghost }: { r: RoomDef; ghost: boolean }) {
+  const W = r.w * TILE;
+  const H = r.h * TILE;
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block", overflow: "visible", shapeRendering: "geometricPrecision" }}>
+      <defs>
+        <pattern id={`bp-${r.id}`} width={16} height={16} patternUnits="userSpaceOnUse">
+          <path d="M16 0H0V16" fill="none" stroke={ghost ? "rgba(232,116,59,0.14)" : "rgba(90,80,70,0.08)"} strokeWidth={0.5} />
+        </pattern>
+      </defs>
+      <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={3} fill={ghost ? "rgba(255,248,242,0.75)" : "rgba(255,255,255,0.35)"} />
+      <rect x={0.5} y={0.5} width={W - 1} height={H - 1} rx={3} fill={`url(#bp-${r.id})`} />
+      <rect
+        x={0.5}
+        y={0.5}
+        width={W - 1}
+        height={H - 1}
+        rx={3}
+        fill="none"
+        stroke={ghost ? "rgba(232,116,59,0.55)" : "rgba(90,80,70,0.32)"}
+        strokeWidth={1}
+        strokeDasharray="4 3"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+function Room({ r, state }: { r: RoomDef; state: RoomState }) {
+  return (
+    <div className="absolute" style={{ left: r.x * TILE, top: r.y * TILE, width: r.w * TILE, height: r.h * TILE }}>
+      <AnimatePresence initial={false}>
+        {state === "built" ? (
+          <motion.div
+            key="built"
+            className="absolute inset-0"
+            initial={{ clipPath: "inset(0% 0% 100% 0%)", opacity: 0.4 }}
+            animate={{ clipPath: "inset(-10% -10% -10% -10%)", opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <BuiltRoom r={r} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key={`bp-${state}`}
+            className="absolute inset-0"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <BlueprintRoom r={r} ghost={state === "ghost"} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function RoomLabel({ r, state, count, locked, note }: { r: RoomDef; state: RoomState; count: number; locked: boolean; note?: string }) {
   if (state === "built")
     return (
-      <OnFloor at={[r.x + 0.4, r.y + 2.4]} h={0}>
-        <div className="absolute left-0 top-0">
+      <div className="absolute" style={{ left: r.x * TILE + 5, top: r.y * TILE + 6 }}>
+        <div className="counter" style={{ ["--origin" as string]: "0% 0%" }}>
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -61,12 +188,12 @@ function RoomLabel({ r, state, count, locked, note }: { r: RoomDef; state: RoomS
             </motion.div>
           )}
         </div>
-      </OnFloor>
+      </div>
     );
   if (state === "ghost")
     return (
-      <OnFloor at={[r.x + r.w / 2, r.y + r.h / 2]}>
-        <div className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2">
+      <div className="absolute grid place-items-center" style={{ left: r.x * TILE, top: r.y * TILE, width: r.w * TILE, height: r.h * TILE }}>
+        <div className="counter" style={{ ["--origin" as string]: "50% 50%" }}>
           <motion.div
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
@@ -77,15 +204,17 @@ function RoomLabel({ r, state, count, locked, note }: { r: RoomDef; state: RoomS
             <div className="flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[11.5px] font-semibold text-ink shadow-[0_2px_10px_-2px_rgba(232,116,59,0.35)] ring-1 ring-[#f3cfb6]">
               <span className="text-accent">+</span> {r.name}
             </div>
-            <div className="w-max max-w-[190px] text-[10.5px] leading-snug font-medium text-[#a8623e]">{r.suggestion}</div>
+            <div className="text-[10.5px] leading-snug font-medium text-[#a8623e]">{r.suggestion}</div>
           </motion.div>
         </div>
-      </OnFloor>
+      </div>
     );
   return (
-    <OnFloor at={[r.x + r.w / 2, r.y + r.h / 2]}>
-      <div className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[9.5px] font-medium tracking-[0.14em] text-black/35 uppercase">{r.name}</div>
-    </OnFloor>
+    <div className="absolute grid place-items-center" style={{ left: r.x * TILE, top: r.y * TILE, width: r.w * TILE, height: r.h * TILE }}>
+      <div className="counter" style={{ ["--origin" as string]: "50% 50%" }}>
+        <div className="font-mono text-[9.5px] font-medium tracking-[0.14em] text-black/30 uppercase">{r.name}</div>
+      </div>
+    </div>
   );
 }
 
@@ -130,15 +259,15 @@ function Prop({ p }: { p: PropScene }) {
     };
   }, [px, py, x, y, p.delay]);
   return (
-    <OnFloor at={() => [x.get() / TILE, y.get() / TILE]} h={1.2} z={900}>
     <motion.div
       className="absolute left-0 top-0"
+      style={{ x, y, zIndex: 900 }}
       initial={{ opacity: 0, scale: 0.6 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.7, transition: { duration: 0.25 } }}
       transition={{ type: "spring", stiffness: 300, damping: 24, delay: p.delay ?? 0 }}
     >
-      <div className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2">
+      <div className="counter absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2" style={{ ["--origin" as string]: "50% 50%" }}>
         <div className={`flex items-center gap-1.5 whitespace-nowrap rounded-[10px] px-2 py-1 text-[11px] font-semibold shadow-[0_6px_16px_-6px_rgba(0,0,0,0.3)] ring-1 ${PROP_TONE[p.tone ?? "default"]}`}>
           <span className="text-[10px] opacity-70">{PROP_ICON[p.kind]}</span>
           <span>{p.label}</span>
@@ -146,7 +275,6 @@ function Prop({ p }: { p: PropScene }) {
         </div>
       </div>
     </motion.div>
-    </OnFloor>
   );
 }
 
@@ -170,9 +298,6 @@ export interface Follow {
   panY?: MotionValue<number>;
 }
 
-/** The back wall stands above the floor's top edge; leave room for it when fitting the view. */
-const WALL_ROOM = 2.2;
-
 export function Office({
   scene,
   className,
@@ -191,19 +316,18 @@ export function Office({
   follow?: Follow;
   onFloorClick?: (x: number, y: number) => void;
   agentHandlers?: (id: string) => AgentHandlers | undefined;
-  /** Extra layers pinned to the floor (player, popovers…). */
+  /** Extra layers rendered inside the world (player, popovers…). */
   children?: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const world = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  const [near, setNear] = useState(false);
-  const bodies = useMemo(() => new Bodies(), []);
-  const layer = useMemo(() => new FloorLayer(), []);
-  // The camera: the floor point at the centre of the view (tiles), and pixels per tile there.
-  const camX = useMotionValue(WORLD.w / 2);
-  const camZ = useMotionValue(WORLD.h / 2);
-  const camS = useMotionValue(16);
+  const s = useMotionValue(1);
+  const tx = useMotionValue(0);
+  const ty = useMotionValue(0);
   const ready = useRef(false);
+
+  const [near, setNear] = useState(false);
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -225,109 +349,106 @@ export function Office({
 
   const cam = useMemo(() => resolveCamera(scene.camera), [scene.camera]);
   const camKey = `${cam.x}|${cam.y}|${cam.w}|${cam.h}|${cam.cover ? 1 : 0}|${cam.anchor ?? ""}`;
+
   const il = inset?.left ?? 0;
   const ir = inset?.right ?? 0;
   const it = inset?.top ?? 0;
   const ib = inset?.bottom ?? 0;
 
-  // Scene camera: fit the requested rectangle into the uncovered part of the view.
   useEffect(() => {
     if (!size || !size.w || !near || follow) return;
     const vw = Math.max(1, size.w - il - ir);
     const vh = Math.max(1, size.h - it - ib);
     const fit = cam.cover ? Math.max : Math.min;
-    const S = fit(vw / cam.w, vh / (cam.h * FLOOR_DEPTH + (cam.y < 4 ? WALL_ROOM : 0.6)));
-    const X = cam.x + cam.w / 2 - (il - ir) / 2 / S;
-    let Z = cam.y + cam.h / 2 - (it - ib) / 2 / (S * FLOOR_DEPTH);
-    if (cam.anchor === "top") Z = cam.y + (vh / 2 - it) / (S * FLOOR_DEPTH) - WALL_ROOM / FLOOR_DEPTH / 2;
-    if (cam.y < 4) Z -= WALL_ROOM / FLOOR_DEPTH / 2;
+    const S = fit(vw / (cam.w * TILE), vh / (cam.h * TILE));
+    // Centre the camera inside the uncovered area, but never show past the
+    // world's edge when the world is big enough to fill the frame.
+    const place = (center: number, view: number, off: number, full: number, world: number, top = false) => {
+      const scaled = world * S;
+      if (scaled <= view) return top ? off : off + (view - scaled) / 2;
+      const want = off + view / 2 - center * S;
+      const lo = Math.min(0, full - scaled);
+      const hi = off;
+      return Math.min(hi, Math.max(lo, want));
+    };
+    const X = place((cam.x + cam.w / 2) * TILE, vw, il, size.w - ir, WORLD.w * TILE);
+    const Y = place((cam.y + cam.h / 2) * TILE, vh, it, size.h - ib, WORLD.h * TILE, cam.anchor === "top");
     if (!ready.current) {
       ready.current = true;
-      camS.set(S);
-      camX.set(X);
-      camZ.set(Z);
+      s.set(S);
+      tx.set(X);
+      ty.set(Y);
+      world.current?.style.setProperty("--inv", String(1 / S));
       return;
     }
     const o = { duration: 1.25, ease: EASE_CAM };
-    const a = [animate(camS, S, o), animate(camX, X, o), animate(camZ, Z, o)];
+    const a = [animate(s, S, o), animate(tx, X, o), animate(ty, Y, o)];
     return () => a.forEach((c) => c.stop());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camKey, size?.w, size?.h, il, ir, it, ib, near]);
 
-  // Follow mode: keep a point centred, inside the building, with a soft spring.
+  useMotionValueEvent(s, "change", (v) => world.current?.style.setProperty("--inv", String(1 / v)));
+
+  // Follow mode: keep a point centred, clamped to the world, with a soft spring.
   const dummy = useMotionValue(0);
   const fx = follow?.x ?? dummy;
   const fy = follow?.y ?? dummy;
   const px = follow?.panX ?? dummy;
   const py = follow?.panY ?? dummy;
-  const springX = useSpring(camX, { stiffness: 140, damping: 26, mass: 0.9 });
-  const springZ = useSpring(camZ, { stiffness: 140, damping: 26, mass: 0.9 });
+  const followX = useMotionValue(0);
+  const followY = useMotionValue(0);
+  const springX = useSpring(followX, { stiffness: 140, damping: 26, mass: 0.9 });
+  const springY = useSpring(followY, { stiffness: 140, damping: 26, mass: 0.9 });
   const zoom = follow?.zoom ?? 0;
+  const recenter = useRef<(snap?: boolean) => void>(() => {});
+  useLayoutEffect(() => {
+    recenter.current = (snap = false) => {
+    if (!follow || !size) return;
+    const S = zoom;
+    const clampAxis = (c: number, view: number, worldPx: number) => {
+      const scaled = worldPx * S;
+      if (scaled <= view) return (view - scaled) / 2;
+      return Math.min(0, Math.max(view - scaled, view / 2 - c * S));
+    };
+    const X = clampAxis(fx.get() + px.get(), size.w, WORLD.w * TILE);
+    const Y = clampAxis(fy.get() + py.get(), size.h, WORLD.h * TILE);
+    followX.set(X);
+    followY.set(Y);
+    if (snap) {
+      springX.jump(X);
+      springY.jump(Y);
+    }
+    };
+  });
+  useMotionValueEvent(fx, "change", () => recenter.current());
+  useMotionValueEvent(fy, "change", () => recenter.current());
+  useMotionValueEvent(px, "change", () => recenter.current());
+  useMotionValueEvent(py, "change", () => recenter.current());
   const followed = useRef(false);
-  const recenter = useCallback(
-    (snap = false) => {
-      if (!follow || !size) return;
-      const S = camS.get();
-      const clamp = (c: number, half: number, lo: number, hi: number) => (hi - lo <= 2 * half ? (lo + hi) / 2 : Math.min(hi - half, Math.max(lo + half, c)));
-      const X = clamp((fx.get() + px.get()) / TILE, size.w / 2 / S, -0.5, WORLD.w + 0.5);
-      const Z = clamp((fy.get() + py.get()) / TILE, size.h / 2 / (S * FLOOR_DEPTH), -WALL_ROOM / FLOOR_DEPTH, WORLD.h + 0.8);
-      camX.set(X);
-      camZ.set(Z);
-      if (snap) {
-        springX.jump(X);
-        springZ.jump(Z);
-      }
-    },
-    [follow, size, camS, fx, fy, px, py, camX, camZ, springX, springZ],
-  );
-  useEffect(() => {
-    if (!follow) return;
-    const subs = [fx, fy, px, py].map((v) => v.on("change", () => recenter()));
-    return () => subs.forEach((u) => u());
-  }, [follow, fx, fy, px, py, recenter]);
+  useLayoutEffect(() => {
+    if (near) world.current?.style.setProperty("--inv", String(1 / s.get()));
+  }, [near, s]);
+
   useEffect(() => {
     if (!follow || !size || !near) return;
     const first = !followed.current;
     followed.current = true;
-    const S = zoom * TILE;
     if (first) {
-      camS.set(S);
-      recenter(true);
-      return;
+      s.set(zoom);
+      world.current?.style.setProperty("--inv", String(1 / zoom));
+    } else {
+      const a = animate(s, zoom, { duration: 0.5, ease: [0.22, 1, 0.36, 1] });
+      recenter.current();
+      return () => a.stop();
     }
-    const a = animate(camS, S, { duration: 0.5, ease: [0.22, 1, 0.36, 1], onUpdate: () => recenter() });
-    return () => a.stop();
+    recenter.current(first);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoom, size?.w, size?.h, !!follow, near]);
 
-  /** The camera right now, for the 3D scene and the 2D layer alike. */
-  const sizeRef = useRef(size);
-  sizeRef.current = size;
-  const getCam = useCallback((): Cam | null => {
-    const sz = sizeRef.current;
-    if (!sz) return null;
-    return { x: (follow ? springX : camX).get(), z: (follow ? springZ : camZ).get(), s: camS.get(), w: sz.w, h: sz.h };
-  }, [follow, springX, springZ, camX, camZ, camS]);
-
-  // Every frame, move the 2D layer to where the camera shows each pinned point.
-  useEffect(() => {
-    if (!near) return;
-    let raf = 0;
-    const tick = () => {
-      const c = getCam();
-      if (c) layer.update(c);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [near, getCam, layer]);
-
   const onClickWorld = (e: React.MouseEvent<HTMLDivElement>) => {
-    const c = getCam();
-    if (!onFloorClick || !c || !box.current) return;
-    const r = box.current.getBoundingClientRect();
-    const [x, z] = unproject(c, e.clientX - r.left, e.clientY - r.top);
-    onFloorClick(x, z);
+    if (!onFloorClick || !world.current) return;
+    const r = world.current.getBoundingClientRect();
+    onFloorClick(((e.clientX - r.left) / r.width) * WORLD.w, ((e.clientY - r.top) / r.height) * WORLD.h);
   };
 
   const roomState = (id: RoomId): RoomState => scene.rooms[id] ?? "hidden";
@@ -338,48 +459,99 @@ export function Office({
     if (m && m.room !== "ceo" && !m.human) counts[m.room] = (counts[m.room] ?? 0) + 1;
   });
 
+  const visibleFurniture = FURNITURE.filter((f) => inLayout(f) && (f.room === "hall" || roomState(f.room) !== "hidden"));
+
   return (
-    <BodiesContext.Provider value={bodies}>
-      <FloorContext.Provider value={layer}>
-        {/* isolate: tags and cards stack among themselves, never over the app's panels */}
-        <div ref={box} className={`relative isolate h-full w-full overflow-hidden ${rounded ? "rounded-[inherit]" : ""} ${className ?? ""}`} style={{ background: "#ece6dc" }}>
-          {near && size && <Stage getCam={getCam} rooms={scene.rooms} board={scene.board} store={bodies} />}
-          {near && (
-            <div
-              className="px-world absolute inset-0"
-              style={{ opacity: size ? 1 : 0, cursor: onFloorClick && !follow ? "pointer" : undefined }}
-              onClick={onClickWorld}
-            >
-              <AnimatePresence>
-                {agents.map(([id, a]) => {
-                  const m = CAST[id];
-                  if (!m || !a) return null;
-                  return <Avatar key={id} member={m} scene={a} labels={scene.labels ?? true} handlers={agentHandlers?.(id)} />;
-                })}
-              </AnimatePresence>
+    <div ref={box} className={`relative h-full w-full overflow-hidden ${rounded ? "rounded-[inherit]" : ""} ${className ?? ""}`} style={{ background: "#e9e3d8" }}>
+      {near && (
+      <motion.div
+        ref={world}
+        className="px-world absolute left-0 top-0"
+        style={{
+          width: WORLD.w * TILE,
+          height: WORLD.h * TILE,
+          x: follow ? springX : tx,
+          y: follow ? springY : ty,
+          scale: s,
+          transformOrigin: "0 0",
+          opacity: size ? 1 : 0,
+          // Following someone (the office app): the floor is grabbed to look around, so no click cursor.
+          cursor: onFloorClick && !follow ? "pointer" : undefined,
+        }}
+        onClick={onClickWorld}
+      >
+        {/* hallway floor */}
+        <svg className="absolute inset-0" width={WORLD.w * TILE} height={WORLD.h * TILE}>
+          <defs>
+            <pattern id="hall" width={16} height={16} patternUnits="userSpaceOnUse">
+              <rect width={16} height={16} fill="#f0ebe2" />
+              <rect width={16} height={1} fill="#e9e2d7" />
+              <rect width={1} height={16} fill="#e9e2d7" />
+            </pattern>
+          </defs>
+          <rect x={0} y={0} width={WORLD.w * TILE} height={WORLD.h * TILE} fill="url(#hall)" />
+          <rect x={0} y={0} width={WORLD.w * TILE} height={WORLD.h * TILE} fill="none" stroke={WALL_DARK} strokeWidth={4} />
+        </svg>
 
-              <AnimatePresence>{Object.entries(scene.props ?? {}).map(([id, p]) => (p ? <Prop key={id} p={p} /> : null))}</AnimatePresence>
+        {Object.values(ROOMS).map((r) => (roomState(r.id) === "hidden" ? null : <Room key={r.id} r={r} state={roomState(r.id)} />))}
 
-              {children}
+        {/* furniture + people share one z-sorted layer */}
+        {visibleFurniture.map((f, i) => {
+          const st = f.room === "hall" ? "built" : roomState(f.room);
+          const built = st === "built";
+          const [, fh] = f.kind === "rug" ? [0, (f.h ?? 3) * TILE] : SIZE[f.kind];
+          const wall = WALL_ITEMS.includes(f.kind) || f.kind === "rug";
+          const zFront = wall ? 1 : Math.round(f.y * TILE + fh);
+          const common = {
+            initial: false as const,
+            animate: built ? { opacity: 1, y: [-6, 0], filter: "grayscale(0)" } : { opacity: st === "ghost" ? 0 : 0.13, y: 0, filter: "grayscale(1)" },
+            transition: { duration: 0.55, delay: built ? 0.35 + (i % 9) * 0.05 : 0, ease: [0.22, 1, 0.36, 1] as const },
+          };
+          return (
+            <Fragment key={f.id}>
+              {HAS_BACK.has(f.kind) && (
+                <motion.div className="absolute" style={{ left: f.x * TILE, top: f.y * TILE, zIndex: Math.round(f.y * TILE) }} {...common}>
+                  <FurnitureArt f={f} layer="back" />
+                </motion.div>
+              )}
+              <motion.div className="absolute" style={{ left: f.x * TILE, top: f.y * TILE, zIndex: zFront }} {...common}>
+                <FurnitureArt f={f} board={scene.board} />
+              </motion.div>
+            </Fragment>
+          );
+        })}
 
-              <div className="pointer-events-none absolute inset-0" style={{ zIndex: 1500 }}>
-                {Object.values(ROOMS).map((r) =>
-                  roomState(r.id) === "hidden" ? null : (
-                    <RoomLabel
-                      key={`${r.id}-${roomState(r.id)}`}
-                      r={r}
-                      state={roomState(r.id)}
-                      count={counts[r.id] ?? 0}
-                      locked={scene.locked?.includes(r.id) ?? false}
-                      note={scene.roomNotes?.[r.id]}
-                    />
-                  ),
-                )}
-              </div>
-            </div>
+        <AnimatePresence>
+          {agents.map(([id, a]) => {
+            const m = CAST[id];
+            if (!m || !a) return null;
+            return <Avatar key={id} member={m} scene={a} labels={scene.labels ?? true} handlers={agentHandlers?.(id)} />;
+          })}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {Object.entries(scene.props ?? {}).map(([id, p]) => (p ? <Prop key={id} p={p} /> : null))}
+        </AnimatePresence>
+
+        {children}
+
+        {/* room labels float above everything */}
+        <div className="absolute inset-0" style={{ zIndex: 1000, pointerEvents: "none" }}>
+          {Object.values(ROOMS).map((r) =>
+            roomState(r.id) === "hidden" ? null : (
+              <RoomLabel
+                key={`${r.id}-${roomState(r.id)}`}
+                r={r}
+                state={roomState(r.id)}
+                count={counts[r.id] ?? 0}
+                locked={scene.locked?.includes(r.id) ?? false}
+                note={scene.roomNotes?.[r.id]}
+              />
+            ),
           )}
         </div>
-      </FloorContext.Provider>
-    </BodiesContext.Provider>
+      </motion.div>
+      )}
+    </div>
   );
 }

@@ -1,4 +1,4 @@
-import { BLOCK, FURNITURE, ROOMS, SOLID_BY_SIZE, WORLD, inLayout, layoutMode } from "./layout";
+import { BLOCK, FURNITURE, ROOMS, WORLD, inLayout, layoutMode } from "./layout";
 import type { Pt } from "./types";
 
 // Walk grid at half-tile resolution.
@@ -28,8 +28,8 @@ function buildGrid() {
         if (yy >= 0 && yy < GH && xx >= 0 && xx < GW) g[yy * GW + xx] = 0;
   };
 
-  // World edge, and the strip behind the building's back wall
-  block(0, 0, WORLD.w, 3.2);
+  // World edge
+  block(0, 0, WORLD.w, 0.5);
   block(0, WORLD.h - 0.5, WORLD.w, 0.5);
   block(0, 0, 0.5, WORLD.h);
   block(WORLD.w - 0.5, 0, 0.5, WORLD.h);
@@ -46,7 +46,7 @@ function buildGrid() {
 
   for (const f of FURNITURE) {
     if (!inLayout(f)) continue;
-    const b = BLOCK[f.kind] ?? (SOLID_BY_SIZE.includes(f.kind) ? [0, 0, f.w ?? 1, f.h ?? 1] : undefined);
+    const b = BLOCK[f.kind];
     if (b) block(f.x + b[0], f.y + b[1], b[2], b[3]);
   }
   return g;
