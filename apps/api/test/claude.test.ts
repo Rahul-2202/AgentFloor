@@ -62,3 +62,28 @@ test("an office without a Claude token doesn't start (and nothing is created)", 
   assert.deepEqual(calls, []);
   assert.equal((await machines.get("o1")).state, "none", "not marked as an error");
 });
+
+test("when the machine provider refuses the office's secret, the start fails with the reason saved", async () => {
+  const calls: string[] = [];
+  const cloud = new Proxy({}, { get: (_t, name) => async () => void calls.push(String(name)) }) as unknown as Cloud;
+  const rows = new Map<string, { sandboxId: string | null; state: string; error?: string | null }>();
+  const machines: MachineStore = {
+    get: async (id) => rows.get(id) ?? { sandboxId: null, state: "none" },
+    set: async (id, p) => void rows.set(id, { sandboxId: p.sandboxId ?? rows.get(id)?.sandboxId ?? null, state: p.state, error: p.error ?? null }),
+  };
+  const m = new OfficeMachines({
+    cloud,
+    machines,
+    link: memoryLinkStore(),
+    connectedSince: () => null,
+    snapshot: "snap",
+    linkUrl: "wss://api/office-link",
+    claudeSecret: async () => {
+      throw new Error("Invalid credentials");
+    },
+  });
+  await assert.rejects(m.start("o1"), /Invalid credentials/);
+  assert.deepEqual(calls, [], "nothing created");
+  assert.equal(rows.get("o1")?.state, "error");
+  assert.match(rows.get("o1")?.error ?? "", /Invalid credentials/);
+});
