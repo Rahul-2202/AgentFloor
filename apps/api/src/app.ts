@@ -239,6 +239,8 @@ export async function buildApp(deps: Deps) {
         return { state: await deps.machines.start(office.id) };
       } catch (err) {
         if (err instanceof ClaudeTokenError) return reply.code(400).send({ error: err.message, code: "claude_token" });
+        // Shown to the CEO, and listed for admins in /admin.
+        deps.errors?.record("api", `office start failed: ${(err as Error).message}`, { officeId: office.id, context: { user: req.user.githubLogin } });
         return reply.code(502).send({ error: `Couldn't start your office: ${(err as Error).message}` });
       }
     });

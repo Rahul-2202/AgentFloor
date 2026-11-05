@@ -122,3 +122,19 @@ test("people who try to sign in show up for admins, who let them in or dismiss t
   assert.deepEqual((await as("boss", "DELETE", `/admin/requests/${stranger.id}`)).json().requests, []);
   assert.equal((await as("boss", "POST", `/admin/requests/${stranger.id}/allow`)).statusCode, 404);
 });
+
+test("an office that fails to start shows up in the admin's error list", async () => {
+  const recorded: string[] = [];
+  const app = await buildApp({
+    verify: async () => users.boss!,
+    offices: { officeOf: async () => ({ id: "o", name: "O", onboardedAt: null, sandboxState: "none", daemonConnected: false }), ensureOffice: async () => ({ office: { id: "o", name: "O", onboardedAt: null, sandboxState: "none", daemonConnected: false }, created: false }) },
+    hub: new OfficeHub(memoryLinkStore()),
+    machines: { start: async () => Promise.reject(new Error("Invalid credentials")) } as never,
+    errors: { record: (src, msg) => void recorded.push(`${src}:${msg}`) },
+    webOrigins: [],
+  });
+  const res = await app.inject({ method: "POST", url: "/office/start", headers: { authorization: "Bearer x" } });
+  assert.equal(res.statusCode, 502);
+  assert.match(res.json().error, /Invalid credentials/);
+  assert.deepEqual(recorded, ["api:office start failed: Invalid credentials"]);
+});

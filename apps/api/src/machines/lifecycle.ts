@@ -1,5 +1,6 @@
 import { newOfficeToken } from "@agentfloor/shared/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ClaudeTokenError } from "../claude/tokens.ts";
 import type { LinkStore } from "../link/store.ts";
 import type { Cloud } from "./cloud.ts";
 import type { CodeBundle } from "./code.ts";
@@ -127,10 +128,10 @@ export class OfficeMachines {
     const log = this.o.log ?? (() => {});
     let m = await this.o.machines.get(officeId);
     let since = 0;
-    // The office runs on its CEO's own Claude login: refused (before anything starts) without one,
-    // and the machine's secret is refreshed from it on every start.
-    const claudeSecret = typeof this.o.claudeSecret === "function" ? await this.o.claudeSecret(officeId) : this.o.claudeSecret;
     try {
+      // The office runs on its CEO's own Claude login: refused (before anything starts) without one,
+      // and the machine's secret is refreshed from it on every start.
+      const claudeSecret = typeof this.o.claudeSecret === "function" ? await this.o.claudeSecret(officeId) : this.o.claudeSecret;
       // A machine deleted outside AgentFloor (or destroyed by the provider): start afresh.
       if (m.sandboxId) {
         const state = await this.o.cloud.state(m.sandboxId).catch((err: Error) => (/not found/i.test(err.message) ? "destroyed" : Promise.reject(err)));
@@ -189,6 +190,8 @@ export class OfficeMachines {
       await this.o.machines.set(officeId, { state: "started" });
       return "started";
     } catch (err) {
+      // No Claude token yet isn't a machine failure: the office asks for one and stays as it was.
+      if (err instanceof ClaudeTokenError) throw err;
       const message = (err as Error).message;
       log(`office ${officeId}: ${message}`);
       await this.o.machines.set(officeId, { state: "error", error: message }).catch(() => {});
